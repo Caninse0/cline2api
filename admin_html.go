@@ -622,7 +622,7 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
         <div class="field"><label>引擎版本</label><input type="text" id="settingVersion" disabled></div>
       </div>
       <div class="form-row">
-        <div class="field"><label>回退模型链</label><input type="text" id="settingModelChain" placeholder="z-ai/glm-5.3-flash, deepseek/deepseek-v4-flash, cline-free/longcat-2.0" onchange="updateConfig()"></div>
+        <div class="field"><label>回退模型链</label><input type="text" id="settingModelChain" placeholder="z-ai/glm-5.3-flash, deepseek/deepseek-v4-flash, cline-free/longcat-2.0" oninput="this.dataset.dirty='1'" onchange="updateConfig()"></div>
       </div>
       <div class="form-row">
         <div class="field"><label>账号文件</label><input type="text" id="settingPoolPath" disabled></div>
@@ -937,6 +937,7 @@ const I18N = {
   '代理配置': 'Proxy Config',
   '默认模型': 'Default Model',
   '轮询策略': 'Rotation Strategy',
+  '回退模型链': 'Fallback Model Chain',
   '轮询 (round_robin)': 'Round robin',
   '填满 (fill)': 'Fill',
   '随机 (random)': 'Random',
@@ -1327,8 +1328,10 @@ async function loadStats() {
     _('statOcOutputTokens').textContent = formatTokenCount(oc.outputTokens || 0);
     _('statOcTotalTokens').textContent = formatTokenCount(oc.totalTokens || 0);
     if (s.version) _('settingVersion').value = s.version;
-    if (s.strategy) _('settingStrategy').value = s.strategy;
-    _('settingModelChain').value = (s.modelChain || []).join(', ');
+    // 设置项由 /config 返回为准；这里仅在用户未编辑时回填，避免轮询清掉正在输入的内容
+    const fillIfIdle = (id, val) => { const el = _(id); if (el && document.activeElement !== el && !el.dataset.dirty) el.value = val; };
+    if (s.strategy) fillIfIdle('settingStrategy', s.strategy);
+    fillIfIdle('settingModelChain', (s.modelChain || []).join(', '));
   } catch (e) { /* ignore */ }
 }
 
@@ -1725,9 +1728,11 @@ function copyText(t) {
 async function updateConfig() {
   const strategy = _('settingStrategy').value;
   const defaultModel = _('settingDefModel').value;
-  const modelChain = _('settingModelChain').value.split(',').map(s => s.trim()).filter(Boolean);
+  const chainField = _('settingModelChain');
+  const modelChain = chainField.value.split(',').map(s => s.trim()).filter(Boolean);
   try {
     await api('POST', '/config/update', { strategy, defaultModel, modelChain });
+    delete chainField.dataset.dirty;
     toast(t('配置已更新'), 'success');
   } catch (e) { toast(t('更新失败: ') + e.message, 'error'); }
 }
