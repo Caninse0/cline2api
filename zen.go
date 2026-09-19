@@ -480,9 +480,17 @@ func buildZenBody(params map[string]any, stream bool) map[string]any {
 			body[key] = val
 		}
 	}
-	for _, key := range []string{"model", "messages", "max_tokens", "max_completion_tokens"} {
+	for _, key := range []string{"model", "max_tokens", "max_completion_tokens"} {
 		if val, ok := params[key]; ok {
 			body[key] = val
+		}
+	}
+	// messages 需先清洗畸形 tool_calls 再透传
+	if msgsRaw, ok := params["messages"]; ok {
+		if msgsArr, ok := msgsRaw.([]any); ok {
+			body["messages"] = sanitizeMessages(msgsArr)
+		} else {
+			body["messages"] = msgsRaw
 		}
 	}
 	body["stream"] = stream

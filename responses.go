@@ -206,14 +206,18 @@ func chatToResponses(chat map[string]any) map[string]any {
 							continue
 						}
 						fn, _ := cm["function"].(map[string]any)
-						callID, _ := cm["id"].(string)
-						if callID == "" {
-							callID = newResponseID("fc_")
-						}
-						name, args := "", ""
+						// 跳过空名 tool_call（畸形工具调用），客户端无法执行
+						var name, args string
 						if fn != nil {
 							name, _ = fn["name"].(string)
 							args, _ = fn["arguments"].(string)
+						}
+						if name == "" {
+							continue
+						}
+						callID, _ := cm["id"].(string)
+						if callID == "" {
+							callID = newResponseID("fc_")
 						}
 						outputs = append(outputs, map[string]any{
 							"type":      "function_call",
@@ -478,6 +482,10 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 	reqLog := RequestLog{StartedAt: time.Now(), Protocol: "responses", Model: model, Stream: isStream}
 
 	chat := responsesToChat(params)
+	// 清洗畸形 tool_calls（空 function.name / 孤儿 tool 结果），避免上游 400
+	if msgs, ok := chat["messages"].([]any); ok {
+		chat["messages"] = sanitizeMessages(msgs)
+	}
 	chatModel, _ := chat["model"].(string)
 	route := routeModel(chatModel)
 

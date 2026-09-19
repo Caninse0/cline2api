@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -562,6 +563,105 @@ func cleanMessages(messages []any) []any {
 	return cleaned
 }
 
+// sanitizeMessages 修复出站消息历史中的畸形 tool_calls。
+// 背景：上游偶发输出 function.name 为空的 tool call（GLM 流式分片丢失 / 工具调用
+// 以文本形式泄漏），客户端执行后会把残缺记录回放进下一轮历史，导致上游恒定 400：
+// "tool_calls[N].function.name must be a non-empty string"。
+// 处理：
+//  1. 丢弃 function.name 为空的 tool_call；
+//  2. 过滤后 tool_calls 为空则移除该字段；
+//  3. 丢弃没有对应合法 assistant tool_call 的孤儿 tool 结果（自愈被污染的会话）。
+func sanitizeMessages(messages []any) []any {
+	validToolIDs := make(map[string]bool)
+	for _, m := range messages {
+		msg, ok := m.(map[string]any)
+		if !ok || msg["role"] != "assistant" {
+			continue
+		}
+		tcs, ok := msg["tool_calls"].([]any)
+		if !ok {
+			continue
+		}
+		for _, tc := range tcs {
+			tcMap, ok := tc.(map[string]any)
+			if !ok {
+				continue
+			}
+			fn, _ := tcMap["function"].(map[string]any)
+			name, _ := fn["name"].(string)
+			id, _ := tcMap["id"].(string)
+			if name != "" && id != "" {
+				validToolIDs[id] = true
+			}
+		}
+	}
+
+	cleaned := make([]any, 0, len(messages))
+	for _, m := range messages {
+		msg, ok := m.(map[string]any)
+		if !ok {
+			cleaned = append(cleaned, m)
+			continue
+		}
+		role, _ := msg["role"].(string)
+
+		// 孤儿 tool 结果：找不到对应的 assistant tool_call
+		if role == "tool" {
+			id, _ := msg["tool_call_id"].(string)
+			if !validToolIDs[id] {
+				continue
+			}
+			cleaned = append(cleaned, msg)
+			continue
+		}
+
+		// assistant 消息：剔除空名 tool_call
+		if role == "assistant" {
+			if tcs, ok := msg["tool_calls"].([]any); ok {
+				kept := make([]any, 0, len(tcs))
+				for _, tc := range tcs {
+					tcMap, ok := tc.(map[string]any)
+					if !ok {
+						continue
+					}
+					fn, _ := tcMap["function"].(map[string]any)
+					name, _ := fn["name"].(string)
+					if name == "" {
+						continue
+					}
+					kept = append(kept, tcMap)
+				}
+				if len(kept) == 0 {
+					delete(msg, "tool_calls")
+				} else {
+					msg["tool_calls"] = kept
+				}
+			}
+		}
+		cleaned = append(cleaned, msg)
+	}
+	return cleaned
+}
+
+// genToolUseID 生成 tool_use 块 id（上游未返回 id 时的兜底）。
+func genToolUseID() string {
+	return fmt.Sprintf("toolu_%x", time.Now().UnixNano())
+}
+
+// hasToolUseBlocks 判断 Anthropic content 块数组中是否含有有效的 tool_use 块。
+func hasToolUseBlocks(content any) bool {
+	blocks, ok := content.([]any)
+	if !ok {
+		return false
+	}
+	for _, b := range blocks {
+		if bm, ok := b.(map[string]any); ok && bm["type"] == "tool_use" {
+			return true
+		}
+	}
+	return false
+}
+
 func buildUpstreamBody(params map[string]any, stream bool) map[string]any {
 	sessionID := fmt.Sprintf("sess_%d", time.Now().UnixMilli())
 
@@ -586,7 +686,7 @@ func buildUpstreamBody(params map[string]any, stream bool) map[string]any {
 
 	if msgsRaw, ok := params["messages"]; ok {
 		if msgsArr, ok := msgsRaw.([]any); ok {
-			body["messages"] = cleanMessages(msgsArr)
+			body["messages"] = sanitizeMessages(msgsArr)
 		} else {
 			body["messages"] = msgsRaw
 		}
@@ -1393,7 +1493,7 @@ func anthropicToOpenAI(req anthropicReq) map[string]any {
 		case []any:
 			textParts := []string{}
 			var toolCalls []any
-			var toolResult *map[string]any
+			var toolResults []any
 
 			for _, block := range c {
 				if b, ok := block.(map[string]any); ok {
@@ -1405,6 +1505,10 @@ func anthropicToOpenAI(req anthropicReq) map[string]any {
 					case "image":
 						// skip images
 					case "tool_use":
+						// 跳过上游输出的空名 tool_use（畸形 tool call），避免污染历史导致后续 400
+						if name, _ := b["name"].(string); name == "" {
+							continue
+						}
 						argsStr := "{}"
 						if input, ok := b["input"]; ok && input != nil {
 							if s, ok := input.(string); ok {
@@ -1413,8 +1517,12 @@ func anthropicToOpenAI(req anthropicReq) map[string]any {
 								argsStr = string(bts)
 							}
 						}
+						id, _ := b["id"].(string)
+						if id == "" {
+							id = genToolUseID()
+						}
 						tc := map[string]any{
-							"id":   b["id"],
+							"id":   id,
 							"type": "function",
 							"function": map[string]any{
 								"name":      b["name"],
@@ -1423,12 +1531,18 @@ func anthropicToOpenAI(req anthropicReq) map[string]any {
 						}
 						toolCalls = append(toolCalls, tc)
 					case "tool_result":
+						trContent := b["content"]
+						if _, isStr := trContent.(string); !isStr && trContent != nil {
+							if bts, err := json.Marshal(trContent); err == nil {
+								trContent = string(bts)
+							}
+						}
 						tr := map[string]any{
 							"role":         "tool",
-							"content":      b["content"],
+							"content":      trContent,
 							"tool_call_id": b["tool_use_id"],
 						}
-						toolResult = &tr
+						toolResults = append(toolResults, tr)
 					}
 				}
 			}
@@ -1440,8 +1554,13 @@ func anthropicToOpenAI(req anthropicReq) map[string]any {
 					"tool_calls": toolCalls,
 				}
 				msgs = append(msgs, msg)
-			} else if m.Role == "user" && toolResult != nil {
-				msgs = append(msgs, *toolResult)
+			} else if m.Role == "user" && len(toolResults) > 0 {
+				for _, tr := range toolResults {
+					msgs = append(msgs, tr)
+				}
+				if len(textParts) > 0 {
+					msgs = append(msgs, map[string]any{"role": "user", "content": strings.Join(textParts, "\n")})
+				}
 			} else {
 				content := strings.Join(textParts, "\n")
 				msgs = append(msgs, map[string]any{"role": m.Role, "content": content})
@@ -1492,25 +1611,33 @@ func openAIToAnthropic(openAI map[string]any) map[string]any {
 				contentBlocks = append(contentBlocks, map[string]any{"type": "text", "text": text})
 			}
 			for _, tcItem := range tc {
-				if tcMap, ok := tcItem.(map[string]any); ok {
-					funcData, _ := tcMap["function"].(map[string]any)
-					input := funcData["arguments"]
-					// OpenAI arguments is a JSON string; Anthropic expects an object
-					if argsStr, ok := input.(string); ok {
-						var argsObj any
-						if json.Unmarshal([]byte(argsStr), &argsObj) == nil {
-							input = argsObj
+					if tcMap, ok := tcItem.(map[string]any); ok {
+						funcData, _ := tcMap["function"].(map[string]any)
+						// 跳过空名 tool_call（畸形工具调用），避免客户端收到无法执行的空 tool_use 块
+						if name, _ := funcData["name"].(string); name == "" {
+							continue
 						}
+						input := funcData["arguments"]
+						// OpenAI arguments is a JSON string; Anthropic expects an object
+						if argsStr, ok := input.(string); ok {
+							var argsObj any
+							if json.Unmarshal([]byte(argsStr), &argsObj) == nil {
+								input = argsObj
+							}
+						}
+						id, _ := tcMap["id"].(string)
+						if id == "" {
+							id = genToolUseID()
+						}
+						block := map[string]any{
+							"type":  "tool_use",
+							"id":    id,
+							"name":  funcData["name"],
+							"input": input,
+						}
+						contentBlocks = append(contentBlocks, block)
 					}
-					block := map[string]any{
-						"type":  "tool_use",
-						"id":    tcMap["id"],
-						"name":  funcData["name"],
-						"input": input,
-					}
-					contentBlocks = append(contentBlocks, block)
 				}
-			}
 		}
 	}
 
@@ -1614,8 +1741,7 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 			usage := parseTokenUsage(out2["usage"])
 			finalizeRequestLog(&reqLog, usage, time.Time{}, reqLog.StartedAt, true, "")
 			anthropicResp := openAIToAnthropic(out2)
-			if tc, ok := getNested(out2, "choices", 0, "message", "tool_calls").([]any); ok && len(tc) > 0 {
-				anthropicResp["content"] = []any{}
+			if hasToolUseBlocks(anthropicResp["content"]) {
 				anthropicResp["stop_reason"] = "tool_use"
 			}
 			writeJSON(w, http.StatusOK, anthropicResp)
@@ -1683,12 +1809,11 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 		finalizeRequestLog(&reqLog, usage, time.Time{}, reqLog.StartedAt, true, "")
 		anthropicResp := openAIToAnthropic(out)
 
-		if tc, ok := getNested(out, "choices", 0, "message", "tool_calls").([]any); ok && len(tc) > 0 {
-			anthropicResp["content"] = []any{}
-			anthropicResp["stop_reason"] = "tool_use"
-		}
+		if hasToolUseBlocks(anthropicResp["content"]) {
+		anthropicResp["stop_reason"] = "tool_use"
+	}
 
-		writeJSON(w, http.StatusOK, anthropicResp)
+	writeJSON(w, http.StatusOK, anthropicResp)
 	}
 }
 
@@ -1728,28 +1853,36 @@ func handleAnthropicStream(w http.ResponseWriter, upstream *http.Response, acc *
 	textIndex := new(int)
 	*textIndex = -1
 	hasText := false
+	sawNamedTool := false
 	pendingTools := map[int]*toolAccumulator{}
 
-	emitToolBlock := func(acc *toolAccumulator) {
+	emitToolBlock := func(acc *toolAccumulator, index int) {
 		acc.emitted = true
-		var argsObj any
-		json.Unmarshal([]byte(acc.args), &argsObj)
-		if argsObj == nil {
-			argsObj = map[string]any{}
+		args := acc.args
+		if args == "" {
+			args = "{}"
 		}
 		emit("content_block_start", map[string]any{
 			"type":  "content_block_start",
-			"index": acc.index,
+			"index": index,
 			"content_block": map[string]any{
 				"type":  "tool_use",
 				"id":    acc.id,
 				"name":  acc.name,
-				"input": argsObj,
+				"input": map[string]any{},
+			},
+		})
+		emit("content_block_delta", map[string]any{
+			"type":  "content_block_delta",
+			"index": index,
+			"delta": map[string]any{
+				"type":         "input_json_delta",
+				"partial_json": args,
 			},
 		})
 		emit("content_block_stop", map[string]any{
 			"type":  "content_block_stop",
-			"index": acc.index,
+			"index": index,
 		})
 	}
 
@@ -1855,13 +1988,11 @@ func handleAnthropicStream(w http.ResponseWriter, upstream *http.Response, acc *
 				if fn, ok := tcMap["function"].(map[string]any); ok {
 					if name, ok := fn["name"].(string); ok && name != "" {
 						acc.name = name
+						sawNamedTool = true
 					}
 					if args, ok := fn["arguments"].(string); ok && args != "" {
 						acc.args += args
 					}
-				}
-				if acc.id != "" && acc.name != "" && acc.args != "" && !acc.emitted {
-					emitToolBlock(acc)
 				}
 			}
 		}
@@ -1872,7 +2003,9 @@ func handleAnthropicStream(w http.ResponseWriter, upstream *http.Response, acc *
 			case "length":
 				stopReason = "max_tokens"
 			case "tool_calls":
-				stopReason = "tool_use"
+				if sawNamedTool {
+					stopReason = "tool_use"
+				}
 			}
 		}
 	}
@@ -1885,10 +2018,26 @@ func handleAnthropicStream(w http.ResponseWriter, upstream *http.Response, acc *
 		})
 	}
 
-	// Emit any remaining un-emitted tool blocks
-	for _, acc := range pendingTools {
+	// Emit tool blocks in deterministic order with proper indices,
+	// streaming args via input_json_delta (required by Anthropic clients).
+	nextIndex := *textIndex + 1
+	toolKeys := make([]int, 0, len(pendingTools))
+	for k := range pendingTools {
+		toolKeys = append(toolKeys, k)
+	}
+	sort.Ints(toolKeys)
+	for _, k := range toolKeys {
+		acc := pendingTools[k]
+		// 跳过没有名字的畸形 tool call（流式分片丢失 name 分片）
+		if acc.name == "" {
+			continue
+		}
+		if acc.id == "" {
+			acc.id = genToolUseID()
+		}
 		if !acc.emitted {
-			emitToolBlock(acc)
+			emitToolBlock(acc, nextIndex)
+			nextIndex++
 		}
 	}
 
