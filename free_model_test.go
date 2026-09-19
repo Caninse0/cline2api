@@ -749,7 +749,8 @@ func TestPickAccountForModelStrictPreservesStrategy(t *testing.T) {
 	}
 }
 
-func TestCallClineAPIDirectModelsKeepExactIDWithoutFallback(t *testing.T) {
+// 显式模型请求在 429（模型冷却）时应沿 free 链自动降级到下一个可用模型。
+func TestCallClineAPIDirectModelsFallBackOnModelCooldown(t *testing.T) {
 	oldPool := pool
 	oldConfig := getProxyConfig()
 	oldTransport := httpClient.Transport
@@ -771,10 +772,8 @@ func TestCallClineAPIDirectModelsKeepExactIDWithoutFallback(t *testing.T) {
 			pool = &AccountPool{Accounts: []*Account{account}}
 			setProxyConfig(defaultProxyConfig())
 
-			calls := 0
-			var upstreamModel string
+			var attempted []string
 			httpClient.Transport = freeModelRoundTripper(func(req *http.Request) (*http.Response, error) {
-				calls++
 				body, err := io.ReadAll(req.Body)
 				if err != nil {
 					return nil, err
@@ -783,30 +782,98 @@ func TestCallClineAPIDirectModelsKeepExactIDWithoutFallback(t *testing.T) {
 				if err := json.Unmarshal(body, &params); err != nil {
 					return nil, err
 				}
-				upstreamModel, _ = params["model"].(string)
+				upstreamModel, _ := params["model"].(string)
+				attempted = append(attempted, upstreamModel)
+				if upstreamModel == model {
+					// 点名模型冷却
+					return &http.Response{
+						StatusCode: http.StatusTooManyRequests,
+						Body:       io.NopCloser(strings.NewReader(`{"error":"quota"}`)),
+						Header:     make(http.Header),
+						Request:    req,
+					}, nil
+				}
+				// 降级模型成功
 				return &http.Response{
-					StatusCode: http.StatusTooManyRequests,
-					Body:       io.NopCloser(strings.NewReader(`{"error":"quota"}`)),
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"id":"ok","choices":[{"message":{"role":"assistant","content":"hi"}}]}`)),
 					Header:     make(http.Header),
 					Request:    req,
 				}, nil
 			})
 
 			params := map[string]any{"model": model}
-			_, _, err := callClineAPI(params, false)
-			if err == nil {
-				t.Fatal("direct model request should return upstream quota error")
+			resp, _, err := callClineAPI(params, false)
+			if err != nil {
+				t.Fatalf("expected fallback success, got %v", err)
 			}
-			if calls != 1 {
-				t.Fatalf("upstream calls = %d, want 1", calls)
+			defer resp.Body.Close()
+			if len(attempted) < 2 {
+				t.Fatalf("expected fallback attempts after cooling model, got %v", attempted)
 			}
-			if upstreamModel != model {
-				t.Fatalf("upstream model = %q, want %q", upstreamModel, model)
+			if attempted[0] != model {
+				t.Fatalf("first attempt = %q, want requested %q", attempted[0], model)
 			}
-			if params["model"] != model {
-				t.Fatalf("request model changed to %v", params["model"])
+			if attempted[len(attempted)-1] == model {
+				t.Fatal("fallback should not retry the cooling model")
 			}
 		})
+	}
+}
+
+// 非冷却类上游错误（如 500）不触发模型降级，直接透传。
+func TestCallClineAPIDirectModelsNoFallbackOnServerError(t *testing.T) {
+	oldPool := pool
+	oldConfig := getProxyConfig()
+	oldTransport := httpClient.Transport
+	t.Cleanup(func() {
+		pool = oldPool
+		setProxyConfig(oldConfig)
+		httpClient.Transport = oldTransport
+	})
+
+	model := "z-ai/glm-5.3-flash"
+	account := &Account{
+		AccountID:   "direct-account",
+		Email:       "direct@example.com",
+		AccessToken: "direct-token",
+		ExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		Status:      "active",
+	}
+	pool = &AccountPool{Accounts: []*Account{account}}
+	setProxyConfig(defaultProxyConfig())
+
+	calls := 0
+	var upstreamModel string
+	httpClient.Transport = freeModelRoundTripper(func(req *http.Request) (*http.Response, error) {
+		calls++
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		var params map[string]any
+		if err := json.Unmarshal(body, &params); err != nil {
+			return nil, err
+		}
+		upstreamModel, _ = params["model"].(string)
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"boom"}`)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+
+	params := map[string]any{"model": model}
+	_, _, err := callClineAPI(params, false)
+	if err == nil {
+		t.Fatal("server error should be returned as-is")
+	}
+	if calls != 1 {
+		t.Fatalf("upstream calls = %d, want 1 (no model fallback on 500)", calls)
+	}
+	if upstreamModel != model {
+		t.Fatalf("upstream model = %q, want %q", upstreamModel, model)
 	}
 }
 

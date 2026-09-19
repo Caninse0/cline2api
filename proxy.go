@@ -792,11 +792,62 @@ func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account,
 		return callFreeClineAPI(params, stream)
 	}
 
-	acc := pickAccountForModel(model)
-	if acc == nil {
-		return nil, nil, fmt.Errorf("no active accounts available. Use --login or admin API to add accounts")
+	// 显式模型请求：优先用客户端点名的模型；该模型在所有账号上都处于冷却
+	// （或持续 429）时，自动沿 free 模型链降级到下一个可用模型，而不是报错。
+	for _, m := range modelFallbackChain(model) {
+		params["model"] = m
+		for {
+			acc := pickAccountForModelStrict(m)
+			if acc == nil {
+				break // 该模型所有账号均冷却/不可用 → 尝试链上下一个模型
+			}
+			resp, usedAcc, err := callClineAPIWithAccount(acc, params, stream)
+			if err == nil {
+				if m != model {
+					log.Printf("  model fallback: %q cooling on all accounts, serving via %q", model, m)
+				}
+				return resp, usedAcc, nil
+			}
+			var accountErr *clineAccountUnavailableError
+			if errors.As(err, &accountErr) {
+				continue
+			}
+			apiErr, ok := err.(*clineAPIError)
+			if !ok || apiErr.statusCode != http.StatusTooManyRequests {
+				return nil, usedAcc, err
+			}
+			// 429：模型冷却已记录，换下一个账号；全部冷却后降级到下一个模型
+		}
 	}
-	return callClineAPIWithAccount(acc, params, stream)
+	if hasActiveAccounts() {
+		return nil, nil, &freeModelUnavailableError{message: fmt.Sprintf("model %q is cooling on all accounts and no fallback model is available", model)}
+	}
+	return nil, nil, fmt.Errorf("no active accounts available. Use --login or admin API to add accounts")
+}
+
+// modelFallbackChain 显式模型的降级序列：点名模型优先，其后是内置 free 模型链（去重）。
+func modelFallbackChain(requested string) []string {
+	chain := make([]string, 0, 1+len(freeModelChain))
+	chain = append(chain, requested)
+	for _, m := range freeModelChain {
+		if m != requested {
+			chain = append(chain, m)
+		}
+	}
+	return chain
+}
+
+// hasActiveAccounts 池中是否存在 active 状态的账号。
+func hasActiveAccounts() bool {
+	p := loadPool()
+	poolMu.Lock()
+	defer poolMu.Unlock()
+	for _, a := range p.Accounts {
+		if a.Status == "active" {
+			return true
+		}
+	}
+	return false
 }
 
 func callFreeClineAPI(params map[string]any, stream bool) (*http.Response, *Account, error) {
