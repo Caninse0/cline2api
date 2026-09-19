@@ -512,6 +512,9 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 				if fbErr == nil {
 					log.Printf("  responses failover: serving %q via cline pool", chatModel)
 					reqLog.Upstream = upstreamCline
+					if fm, ok := chat["model"].(string); ok && fm != "" {
+						reqLog.Model = fm // zen 故障转移后记录实际服务模型
+					}
 					if fbAcc != nil {
 						reqLog.AccountID = fbAcc.AccountID
 						reqLog.AccountEmail = fbAcc.Email
@@ -574,7 +577,7 @@ func handleResponses(w http.ResponseWriter, r *http.Request) {
 		reqLog.Upstream = upstreamCline
 		upResp, acc, err := callClineAPI(chat, isStream)
 		if effectiveModel, ok := chat["model"].(string); ok && effectiveModel != "" {
-			reqLog.Model = effectiveModel
+			reqLog.Model = effectiveModel // 含回退后的实际服务模型
 		}
 		if err != nil {
 			log.Printf("  responses api error: %v", err)

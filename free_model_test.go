@@ -817,7 +817,12 @@ func TestCallClineAPIDirectModelsFallBackOnModelCooldown(t *testing.T) {
 			if attempted[len(attempted)-1] == model {
 				t.Fatal("fallback should not retry the cooling model")
 			}
-		})
+			// 回写验证：params["model"] 必须反映实际服务模型（供日志归因）
+			servedModel, _ := params["model"].(string)
+			if servedModel != attempted[len(attempted)-1] {
+				t.Fatalf("params model after fallback = %q, want last attempted %q", servedModel, attempted[len(attempted)-1])
+			}
+	})
 	}
 }
 

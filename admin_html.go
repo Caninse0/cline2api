@@ -42,7 +42,11 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text'
 .nav-item.active{color:var(--accent);background:var(--accent-soft)}
 .nav-item svg{width:20px;height:20px;flex-shrink:0}
 .nav-item .nav-label{flex:1}
+.nav-item.dragging{opacity:0.5}
+.nav-item.drop-target{box-shadow:inset 0 2px 0 var(--accent)}
 .sidebar-footer{margin-top:auto;padding:16px 20px;border-top:1px solid var(--border2);font-size:12px;color:var(--text2)}
+.sidebar-lang{padding:0 20px 16px;border-top:1px solid var(--border2)}
+.sidebar-lang .lang-switch{margin-top:12px}
 .sidebar-footer a{color:var(--accent);text-decoration:none}
 .sidebar-footer a:hover{text-decoration:underline}
 .lang-switch{display:flex;gap:4px;margin-top:10px}
@@ -95,6 +99,9 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text'
 
 /* ===== Table ===== */
 table{width:100%;border-collapse:collapse;table-layout:fixed}
+.model-subtable{table-layout:auto}
+.model-subtable td{text-align:left;white-space:nowrap}
+.model-subtable td:nth-child(n+3){text-align:right;font-variant-numeric:tabular-nums}
 th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border2);font-size:13px;vertical-align:middle}
 .section-body.flush{overflow-x:auto}
 th{color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.4px;white-space:nowrap}
@@ -220,6 +227,8 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
   .sidebar{width:100%;height:auto;min-height:0;position:static;border-right:none;border-bottom:1px solid var(--border2)}
   .sidebar-header{padding:14px 16px;border-bottom:none}
   .sidebar-header .brand-sub,.nav-section-label,.sidebar-footer{display:none}
+  .sidebar-lang{padding:0 12px 10px;border-top:none}
+  .sidebar-lang .lang-switch{margin-top:10px}
   .nav-section{display:flex;padding:0 10px 12px;gap:4px;overflow-x:auto}
   .nav-item{flex:1;justify-content:center;gap:6px;margin:0;padding:8px 10px;min-width:max-content}
   .nav-item svg{width:18px;height:18px}
@@ -339,6 +348,8 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
     </div>
     <div style="margin-bottom:4px">API: <span id="footerApiAddr">127.0.0.1:3457</span></div>
     <div><a href="#" onclick="openExternal('https://github.com/dhananjaym182/cline2api');return false">GitHub</a> · <a href="#" onclick="openExternal('https://github.com/dhananjaym182/cline2api/issues');return false">反馈</a> · MIT</div>
+  </div>
+  <div class="sidebar-lang">
     <div class="lang-switch">
       <button type="button" id="langZh" onclick="setLang('zh')">中文</button>
       <button type="button" id="langEn" onclick="setLang('en')">English</button>
@@ -1236,8 +1247,50 @@ const I18N = {
   'opencode 配置已保存': 'OpenCode config saved',
   'opencode 出口代理': 'OpenCode Egress Proxies',
   '发往 opencode 的请求可经代理池轮询出口；命中限流时冷却当前出口并自动跳过。支持 http / https / socks5 / socks5h，每行一个，如 ': 'Requests to opencode can egress through a rotating proxy pool; the current proxy is cooled down and skipped on rate limits. Supports http / https / socks5 / socks5h, one per line, e.g. ',
+  '发往 opencode 的请求可经代理池轮询出口；命中限流时冷却当前出口并自动跳过。支持 http / https / socks5 / socks5h，每行一个，如': 'Requests to opencode can egress through a rotating proxy pool; the current proxy is cooled down and skipped on rate limits. Supports http / https / socks5 / socks5h, one per line, e.g.',
+  'opencode 免费模型': 'opencode Free Models',
+  '＋ 添加 Provider': '＋ Add Provider',
+  '名称 *': 'Name *',
+  '免费': 'Free',
+  '付费': 'Paid',
+  '版本 ': 'Version ',
+  '版本 dev': 'Version dev',
+  'JSON 数组格式：[{"refreshToken":"...","email":"..."}]': 'JSON array format: [{"refreshToken":"...","email":"..."}]',
+  'API Key: <生成的密钥>': 'API Key: <generated key>',
   '代理策略': 'Proxy strategy',
   '自定义 Provider（OpenAI 兼容）': 'Custom Providers (OpenAI-compatible)',
+  '批量编辑': 'Bulk Edit',
+  '批量编辑（每行 Key: Value）': 'Bulk edit (one Key: Value per line)',
+  '应用并保存': 'Apply & Save',
+  '名称': 'Name',
+  '取消': 'Cancel',
+  '保存 Provider': 'Save Provider',
+  '添加 Provider': 'Add Provider',
+  '本地服务器可留空）': 'leave empty on local server)',
+  '超时(秒)': 'Timeout (s)',
+  '优先级（小=优先）': 'Priority (lower = first)',
+  '免费来源（供统计）': 'Free source (for stats)',
+  '模型 ID（逗号分隔，如 z-ai/glm-5.3-flash, deepseek/deepseek-v4-flash）': 'Model IDs (comma-separated, e.g. z-ai/glm-5.3-flash, deepseek/deepseek-v4-flash)',
+  '自定义请求头（每行 Key: Value，如 HTTP-Referer: https://mysite.com）': 'Custom headers (one Key: Value per line, e.g. HTTP-Referer: https://mysite.com)',
+  '请求头（每行一个，格式 Key: Value）': 'Headers (one per line, format Key: Value)',
+  '保存 opencode 请求头': 'Save opencode Headers',
+  'opencode 请求头已保存': 'opencode headers saved',
+  '附加到发往 opencode zen 的请求。特殊值：': 'Attached to requests sent to opencode zen. Special values: ',
+  '附加到发往 opencode zen 的请求。特殊值：$session / $request / $project / $client 会注入每请求的动态身份；留空删除该头。': 'Attached to requests sent to opencode zen. Special values: $session / $request / $project / $client inject per-request dynamic identity; an empty value deletes the header.',
+  '接入任意 OpenAI 兼容上游（OpenRouter / Groq / Cerebras / Gemini / Mistral / Together / 自建 vLLM 等）。模型命中自定义 Provider 时优先走该上游，失败自动按回退链降级，最终兜底 Cline 池。': 'Connect any OpenAI-compatible upstream (OpenRouter / Groq / Cerebras / Gemini / Mistral / Together / self-hosted vLLM, etc.). Matching models route to the provider first; failures fall back along the chain and finally to the Cline pool.',
+  'opencode 请求头（模拟官方客户端）': 'opencode Headers (mimic official client)',
+  '粘贴 refreshToken': 'Paste refreshToken',
+  '如 deepseek/deepseek-v4-flash': 'e.g. deepseek/deepseek-v4-flash',
+  '留空保存 = 清除密码': 'leave empty to save = clear password',
+  '多账号轮询（轮询/填满/随机）': 'Multi-account rotation (round-robin/fill/random)',
+  'OpenAI & Anthropic 双协议': 'OpenAI & Anthropic dual protocol',
+  '429 冷却自动恢复': 'Automatic 429 cooldown recovery',
+  '账号导出/导入（跨设备迁移）': 'Account export/import (cross-device migration)',
+  'OAuth 系统浏览器登录': 'OAuth via system browser',
+  '请求日志与统计': 'Request logs & stats',
+  'System Prompt 覆盖': 'System Prompt override',
+  '跨平台桌面端（Win/Mac/Linux）': 'Cross-platform desktop (Win/Mac/Linux)',
+  '⚠️ 当前监听非本机回环地址（0.0.0.0 或局域网 IP），管理后台无鉴权，局域网内任何设备都可访问。请确认网络环境安全，或配合防火墙限制端口。': '⚠️ Listening on a non-loopback address (0.0.0.0 or LAN IP) exposes the admin panel without authentication to the whole network. Ensure the network is trusted or restrict the port via firewall.',
   '概览': 'Overview',
   '账号': 'Accounts',
   '配置': 'Configuration',
@@ -1386,6 +1439,57 @@ function switchTab(name) {
   if (name === 'upstreams') { loadOcConfig(); loadZenHeaders(); loadProviders(); }
   if (name === 'security') { loadKeys(); loadConfig(); }
 }
+
+// ========== 侧栏排序（拖拽） ==========
+const NAV_ORDER_KEY = 'cline_admin_nav_order';
+function applyNavOrder() {
+  let order = [];
+  try { order = JSON.parse(localStorage.getItem(NAV_ORDER_KEY) || '[]'); } catch(e) {}
+  if (!Array.isArray(order) || !order.length) return;
+  const nav = document.querySelector('.nav-section').parentElement;
+  const items = {};
+  nav.querySelectorAll('.nav-item').forEach(el => { items[el.dataset.tab] = el; });
+  // 重排：按保存的顺序把条目移回其分区末尾，未知 tab 忽略
+  order.forEach(tab => {
+    const el = items[tab];
+    if (!el) return;
+    const sec = el.closest('.nav-section');
+    sec.appendChild(el);
+  });
+}
+function saveNavOrder() {
+  const order = Array.from(document.querySelectorAll('.nav-item')).map(el => el.dataset.tab);
+  try { localStorage.setItem(NAV_ORDER_KEY, JSON.stringify(order)); } catch(e) {}
+}
+function initNavDrag() {
+  let dragged = null;
+  document.querySelectorAll('.nav-item').forEach(el => {
+    el.draggable = true;
+    el.addEventListener('dragstart', e => { dragged = el; el.classList.add('dragging'); try { e.dataTransfer.setData('text/plain', el.dataset.tab); } catch(err){} e.dataTransfer.effectAllowed = 'move'; });
+    el.addEventListener('dragend', () => { el.classList.remove('dragging'); document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('drop-target')); dragged = null; });
+    el.addEventListener('dragover', e => {
+      e.preventDefault();
+      if (!dragged || dragged === el) return;
+      e.dataTransfer.dropEffect = 'move';
+      document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('drop-target'));
+      el.classList.add('drop-target');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+    el.addEventListener('drop', e => {
+      e.preventDefault();
+      if (!dragged || dragged === el) return;
+      const sec = el.closest('.nav-section');
+      const rect = el.getBoundingClientRect();
+      const after = (e.clientY - rect.top) > rect.height / 2;
+      sec.insertBefore(dragged, after ? el.nextSibling : el);
+      dragged.classList.remove('dragging');
+      document.querySelectorAll('.nav-item').forEach(x => x.classList.remove('drop-target'));
+      saveNavOrder();
+    });
+  });
+}
+initNavDrag();
+applyNavOrder();
 
 // 上游服务子标签
 document.querySelectorAll('#upstreamSubTabs .subtab').forEach(el => {

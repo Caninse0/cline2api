@@ -456,7 +456,7 @@ func startProxy(host string, port int) error {
 
 		resp, acc, err := callClineAPI(params, isStream)
 		if effectiveModel, ok := params["model"].(string); ok && effectiveModel != "" {
-			reqLog.Model = effectiveModel
+			reqLog.Model = effectiveModel // 含回退后的实际服务模型
 		}
 		if err != nil {
 			log.Printf("  api error: %v", err)
@@ -804,6 +804,7 @@ func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account,
 				if m != model {
 					log.Printf("  model fallback: %q unavailable, serving via provider %q", model, m)
 				}
+				params["model"] = m // 回写实际服务模型，供请求日志归因
 				return pResp, nil, nil
 			}
 			log.Printf("  provider attempt failed for %q: %v", m, pErr)
@@ -819,6 +820,7 @@ func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account,
 				if m != model {
 					log.Printf("  model fallback: %q cooling on all accounts, serving via %q", model, m)
 				}
+				params["model"] = m // 回写实际服务模型，供请求日志归因
 				return resp, usedAcc, nil
 			}
 			var accountErr *clineAccountUnavailableError
@@ -838,8 +840,12 @@ func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account,
 	}
 	// 终极兜底：free 链（手动链全部失败时自动切换）
 	if model != "free" && !isFreeAliasModel(model) {
-		if resp, acc, err := callFreeClineAPI(withModel(params, "free"), stream); err == nil {
+		fp := withModel(params, "free")
+		if resp, acc, err := callFreeClineAPI(fp, stream); err == nil {
 			log.Printf("  auto fallback: all configured options failed for %q, served by free chain", model)
+			if fm, ok := fp["model"].(string); ok && fm != "" {
+				params["model"] = fm // callFreeClineAPI 就地改写 fp，取回实际服务模型
+			}
 			return resp, acc, nil
 		}
 	}
@@ -1882,6 +1888,9 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 				if fbErr == nil {
 					log.Printf("  anthropic failover: serving %q via cline pool", req.Model)
 					reqLog.Upstream = upstreamCline
+					if fm, ok := openAIReq["model"].(string); ok && fm != "" {
+						reqLog.Model = fm // zen 故障转移后记录实际服务模型
+					}
 					if fbAcc != nil {
 						reqLog.AccountID = fbAcc.AccountID
 						reqLog.AccountEmail = fbAcc.Email
@@ -1963,7 +1972,7 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 
 	resp, acc, err := callClineAPI(openAIReq, req.Stream)
 	if effectiveModel, ok := openAIReq["model"].(string); ok && effectiveModel != "" {
-		reqLog.Model = effectiveModel
+		reqLog.Model = effectiveModel // 含回退后的实际服务模型
 	}
 	if err != nil {
 		log.Printf("  anthropic api error: %v", err)
