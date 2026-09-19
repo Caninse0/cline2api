@@ -100,7 +100,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text'
 /* ===== Table ===== */
 table{width:100%;border-collapse:collapse;table-layout:fixed}
 .model-subtable{table-layout:auto}
-.model-subtable td{text-align:left;white-space:nowrap}
+.model-subtable td{padding:7px 12px;text-align:left;white-space:nowrap}
 .model-subtable td:nth-child(n+3){text-align:right;font-variant-numeric:tabular-nums}
 th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--border2);font-size:13px;vertical-align:middle}
 .section-body.flush{overflow-x:auto}
@@ -108,12 +108,13 @@ th{color:var(--text2);font-weight:600;font-size:11px;text-transform:uppercase;le
 tbody tr:last-child td{border-bottom:none}
 tbody tr{transition:background 0.15s var(--ease)}
 tbody tr:hover{background:var(--surface2)}
-.account-table th:first-child,.account-table td:first-child{width:16%}
-.account-table th:nth-child(2),.account-table td:nth-child(2){width:8%}
-.account-table th:nth-child(3),.account-table td:nth-child(3){width:5%}
+.account-table th:first-child,.account-table td:first-child{width:17%}
+.account-table td:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.account-table th:nth-child(2),.account-table td:nth-child(2){width:9%}
+.account-table th:nth-child(3),.account-table td:nth-child(3){width:6%;text-align:right;font-variant-numeric:tabular-nums}
 .account-table th:nth-child(4),.account-table td:nth-child(4),.account-table th:nth-child(5),.account-table td:nth-child(5),.account-table th:nth-child(6),.account-table td:nth-child(6),.account-table th:nth-child(7),.account-table td:nth-child(7){width:7%;text-align:right;font-variant-numeric:tabular-nums}
-.account-table th:nth-child(8),.account-table td:nth-child(8),.account-table th:nth-child(9),.account-table td:nth-child(9){width:11%;white-space:nowrap;color:var(--text2)}
-.account-table th:last-child,.account-table td:last-child{width:120px;min-width:120px;text-align:right;white-space:nowrap}
+.account-table th:nth-child(8),.account-table td:nth-child(8),.account-table th:nth-child(9),.account-table td:nth-child(9){width:11%;white-space:nowrap;color:var(--text2);overflow:hidden;text-overflow:ellipsis}
+.account-table th:last-child,.account-table td:last-child{width:172px;min-width:172px;text-align:right;white-space:nowrap}
 .account-table td:last-child .btn{width:32px;padding-left:0;padding-right:0;justify-content:center}
 .account-email{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:500}
 .account-cards{display:none}
@@ -268,8 +269,8 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
 	  .account-table{display:none}
 	  .account-cards{display:grid;gap:10px;padding:12px}
 	  .account-card{border:1px solid var(--border2);border-radius:12px;padding:14px;background:var(--surface2)}
-	  .account-card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
-	  .account-card .account-email{max-width:calc(100vw - 170px)}
+  .account-card-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+  .account-card .account-email{max-width:calc(100vw - 170px);min-width:0}
 	  .account-metrics{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:12px}
 	  .account-metric{padding:8px 10px;border-radius:8px;background:var(--surface)}
 	  .account-metric-label{display:block;color:var(--text2);font-size:11px;margin-bottom:2px}
@@ -1616,7 +1617,6 @@ async function loadAccounts() {
           '<td>' + formatTokenCount(st.completionTokens) + '</td>' +
           '<td>' + formatTokenCount(st.totalTokens) + '</td>' +
           '<td>' + formatTokenCount(st.cachedTokens) + '</td>' +
-          '<td></td><td></td><td></td>' +
           '</tr>';
       }).join('');
       const coolsWithoutStats = Object.keys(cools).filter(m => cools[m] && !(a.modelStats || {})[m]);
@@ -1624,16 +1624,16 @@ async function loadAccounts() {
         '<tr style="background:var(--surface2)">' +
           '<td style="padding-left:32px" class="mono">' + esc(m) + '</td>' +
           '<td><span class="status cooldown status-cooldown" title="' + t('模型冷却中') + ' · ' + formatCooldown(cools[m]) + '"><span class="cd-icon">⏳</span><span class="cd-time">' + formatCooldown(cools[m]) + '</span></span></td>' +
-          '<td colspan="8"></td>' +
+          '<td colspan="5"></td>' +
         '</tr>'
       ).join('');
       const totalCooling = Object.keys(cools).length;
       const title = '<tr style="background:var(--surface2)">' +
-        '<td colspan="10" style="padding:8px 32px;color:var(--text2);font-size:12px;font-weight:600">' +
+        '<td colspan="7" style="padding:8px 32px;color:var(--text2);font-size:12px;font-weight:600">' +
           t('按模型统计（仅免费模型）') + (totalCooling ? ' · <span style="color:var(--yellow)">⏳ ' + totalCooling + ' ' + t('模型冷却中') + '</span>' : '') +
         '</td></tr>';
       if (!rows && !extraCools) {
-        return title + '<tr style="background:var(--surface2)"><td colspan="10" style="padding:6px 32px;color:var(--text3);font-size:12px">' + t('暂无数据') + '</td></tr>';
+        return title + '<tr style="background:var(--surface2)"><td colspan="7" style="padding:6px 32px;color:var(--text3);font-size:12px">' + t('暂无数据') + '</td></tr>';
       }
       return title + rows + extraCools;
     };
@@ -1646,7 +1646,7 @@ async function loadAccounts() {
       // 始终显示模型统计展开按钮（无数据时子行提示暂无）
       const expander = '<button class="btn btn-sm btn-icon" onclick="toggleModelRow(\'' + a.accountId + '\', this)" title="' + t('展开') + '">▸</button>';
       return '<tr>' +
-        '<td>' + esc(a.email) + '</td>' +
+        '<td class="mono" style="font-size:12px" title="' + esc(a.email) + '">' + esc(a.email) + '</td>' +
         '<td>' + statusBadge + '</td>' +
         '<td>' + formatNumber(a.usageCount) + '</td>' +
         '<td>' + formatTokenCount(a.promptTokens) + '</td>' +

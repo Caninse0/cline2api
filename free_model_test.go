@@ -822,7 +822,7 @@ func TestCallClineAPIDirectModelsFallBackOnModelCooldown(t *testing.T) {
 			if servedModel != attempted[len(attempted)-1] {
 				t.Fatalf("params model after fallback = %q, want last attempted %q", servedModel, attempted[len(attempted)-1])
 			}
-	})
+		})
 	}
 }
 
@@ -937,5 +937,123 @@ func TestHandleResponsesFreeReturnsTooManyRequestsWhenBothPoolsUnavailable(t *te
 	lastModel := freeModelChain[len(freeModelChain)-1]
 	if requestLogs[0].Model != lastModel {
 		t.Fatalf("request log model = %q, want %q", requestLogs[0].Model, lastModel)
+	}
+}
+
+func TestPickAccountForModelLeastUsedSpreadsUsage(t *testing.T) {
+	oldPool := pool
+	t.Cleanup(func() { pool = oldPool })
+
+	heavy := &Account{
+		AccountID:   "heavy",
+		Email:       "heavy@example.com",
+		AccessToken: "token-heavy",
+		ExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		Status:      "active",
+		ModelStats: map[string]*ModelStat{
+			freeModelPrimary: {ModelID: freeModelPrimary, UsageCount: 100},
+		},
+	}
+	light := &Account{
+		AccountID:   "light",
+		Email:       "light@example.com",
+		AccessToken: "token-light",
+		ExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		Status:      "active",
+		ModelStats: map[string]*ModelStat{
+			freeModelPrimary: {ModelID: freeModelPrimary, UsageCount: 2},
+		},
+	}
+	pool = &AccountPool{Accounts: []*Account{heavy, light}}
+
+	for i := 0; i < 5; i++ {
+		acc := pickAccountForModelLeastUsed(freeModelPrimary)
+		if acc == nil {
+			t.Fatal("pickAccountForModelLeastUsed returned nil with eligible accounts")
+		}
+		if acc.AccountID != "light" {
+			t.Fatalf("pick %d: got account %q, want the least-used account \"light\"", i+1, acc.AccountID)
+		}
+	}
+}
+
+func TestCallClineAPIFreePicksLeastUsedAccount(t *testing.T) {
+	oldPool := pool
+	oldConfig := getProxyConfig()
+	oldTransport := httpClient.Transport
+	t.Cleanup(func() {
+		pool = oldPool
+		setProxyConfig(oldConfig)
+		httpClient.Transport = oldTransport
+	})
+
+	first := &Account{
+		AccountID:   "acc-first",
+		Email:       "first@example.com",
+		AccessToken: "token-first",
+		ExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		Status:      "active",
+		ModelStats: map[string]*ModelStat{
+			freeModelPrimary: {ModelID: freeModelPrimary, UsageCount: 50},
+		},
+	}
+	second := &Account{
+		AccountID:   "acc-second",
+		Email:       "second@example.com",
+		AccessToken: "token-second",
+		ExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		Status:      "active",
+	}
+	pool = &AccountPool{Accounts: []*Account{first, second}}
+	setProxyConfig(defaultProxyConfig())
+
+	var chosen []string
+	httpClient.Transport = freeModelRoundTripper(func(req *http.Request) (*http.Response, error) {
+		token := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
+		chosen = append(chosen, token)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"id":"ok","choices":[]}`)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+
+	for i := 0; i < 3; i++ {
+		resp, _, err := callClineAPI(map[string]any{"model": "free"}, false)
+		if err != nil || resp == nil {
+			t.Fatalf("call %d failed: %v", i+1, err)
+		}
+		resp.Body.Close()
+		if len(chosen) == 0 || chosen[len(chosen)-1] != "token-second" {
+			t.Fatalf("call %d served by %q, want the unused account \"token-second\"", i+1, chosen[len(chosen)-1])
+		}
+	}
+}
+
+func TestSortModelsByAvailabilityPrefersAvailableThenLeastUsed(t *testing.T) {
+	oldPool := pool
+	t.Cleanup(func() { pool = oldPool })
+
+	acc := &Account{
+		AccountID:      "acc-one",
+		Email:          "one@example.com",
+		AccessToken:    "token",
+		ExpiresAt:      time.Now().Add(time.Hour).UnixMilli(),
+		Status:         "active",
+		ModelCooldowns: map[string]time.Time{}, ModelStats: map[string]*ModelStat{
+			freeModelPrimary:  {ModelID: freeModelPrimary, UsageCount: 90},
+			freeModelFallback: {ModelID: freeModelFallback, UsageCount: 3},
+		},
+	}
+	pool = &AccountPool{Accounts: []*Account{acc}}
+
+	chain := []string{freeModelPrimary, freeModelFallback}
+	got := sortModelsByAvailability(chain)
+	if got[0] != freeModelFallback {
+		t.Fatalf("first model = %q, want the less-used %q", got[0], freeModelFallback)
+	}
+	if len(got) != 2 {
+		t.Fatalf("chain length = %d, want 2", len(got))
 	}
 }

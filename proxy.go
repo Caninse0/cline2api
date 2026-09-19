@@ -797,7 +797,17 @@ func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account,
 	//  2. 客户端点名模型走 Cline 池
 	//  3. modelChain（管理员配置或内置 free 链）逐个降级
 	//  4. 全部失败 → 明确报错
-	for _, m := range modelFallbackChain(model) {
+	// 可用性感知重排：点名模型保持首位，其余按「未冷却优先、用量少优先」
+	// 重排，避免回退流量每次都集中砸在第一个可用模型上直到它也冷却。
+	sorted := sortModelsByAvailability(modelFallbackChain(model))
+	chain := make([]string, 0, len(sorted)+1)
+	chain = append(chain, model)
+	for _, m := range sorted {
+		if m != model {
+			chain = append(chain, m)
+		}
+	}
+	for _, m := range chain {
 		// 先试自定义 provider
 		if pResp, pErr, attempted := callCustomProviderAPI(withModel(params, m), stream); attempted {
 			if pErr == nil {
@@ -810,8 +820,14 @@ func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account,
 			log.Printf("  provider attempt failed for %q: %v", m, pErr)
 		}
 
+		// 点名模型保持原有轮询语义；链上的降级模型改用「最久未用优先」，
+		// 避免所有降级流量都压到第一个可用账号/模型的额度上。
+		pickAcc := pickAccountForModelStrict
+		if m != model {
+			pickAcc = pickAccountForModelLeastUsed
+		}
 		for {
-			acc := pickAccountForModelStrict(m)
+			acc := pickAcc(m)
 			if acc == nil {
 				break // 该模型所有账号均冷却/不可用 → 尝试链上下一个模型
 			}
@@ -922,14 +938,17 @@ func hasActiveAccounts() bool {
 func callFreeClineAPI(params map[string]any, stream bool) (*http.Response, *Account, error) {
 	// "free" 别名的实际顺序：管理员配置的回退链优先，否则内置 free 链。
 	configured := getProxyConfig().ModelChain
-	chain := freeModelChain
-	if len(configured) > 0 {
-		chain = configured
+	chain := configured
+	if len(configured) == 0 {
+		chain = freeModelChain
 	}
+	// 同样按可用性重排：把流量摊到用量最少的可用模型上，而不是顺序打满第一个。
+	chain = sortModelsByAvailability(chain)
 	for _, model := range chain {
 		params["model"] = model
+		// "free" 链是纯降级路径：全部用「最久未用优先」挑账号，摊平用量。
 		for {
-			acc := pickAccountForModelStrict(model)
+			acc := pickAccountForModelLeastUsed(model)
 			if acc == nil {
 				break
 			}
@@ -1762,33 +1781,33 @@ func openAIToAnthropic(openAI map[string]any) map[string]any {
 				contentBlocks = append(contentBlocks, map[string]any{"type": "text", "text": text})
 			}
 			for _, tcItem := range tc {
-					if tcMap, ok := tcItem.(map[string]any); ok {
-						funcData, _ := tcMap["function"].(map[string]any)
-						// 跳过空名 tool_call（畸形工具调用），避免客户端收到无法执行的空 tool_use 块
-						if name, _ := funcData["name"].(string); name == "" {
-							continue
-						}
-						input := funcData["arguments"]
-						// OpenAI arguments is a JSON string; Anthropic expects an object
-						if argsStr, ok := input.(string); ok {
-							var argsObj any
-							if json.Unmarshal([]byte(argsStr), &argsObj) == nil {
-								input = argsObj
-							}
-						}
-						id, _ := tcMap["id"].(string)
-						if id == "" {
-							id = genToolUseID()
-						}
-						block := map[string]any{
-							"type":  "tool_use",
-							"id":    id,
-							"name":  funcData["name"],
-							"input": input,
-						}
-						contentBlocks = append(contentBlocks, block)
+				if tcMap, ok := tcItem.(map[string]any); ok {
+					funcData, _ := tcMap["function"].(map[string]any)
+					// 跳过空名 tool_call（畸形工具调用），避免客户端收到无法执行的空 tool_use 块
+					if name, _ := funcData["name"].(string); name == "" {
+						continue
 					}
+					input := funcData["arguments"]
+					// OpenAI arguments is a JSON string; Anthropic expects an object
+					if argsStr, ok := input.(string); ok {
+						var argsObj any
+						if json.Unmarshal([]byte(argsStr), &argsObj) == nil {
+							input = argsObj
+						}
+					}
+					id, _ := tcMap["id"].(string)
+					if id == "" {
+						id = genToolUseID()
+					}
+					block := map[string]any{
+						"type":  "tool_use",
+						"id":    id,
+						"name":  funcData["name"],
+						"input": input,
+					}
+					contentBlocks = append(contentBlocks, block)
 				}
+			}
 		}
 	}
 
@@ -2013,10 +2032,10 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 		anthropicResp := openAIToAnthropic(out)
 
 		if hasToolUseBlocks(anthropicResp["content"]) {
-		anthropicResp["stop_reason"] = "tool_use"
-	}
+			anthropicResp["stop_reason"] = "tool_use"
+		}
 
-	writeJSON(w, http.StatusOK, anthropicResp)
+		writeJSON(w, http.StatusOK, anthropicResp)
 	}
 }
 
