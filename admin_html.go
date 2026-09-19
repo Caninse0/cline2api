@@ -714,8 +714,70 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
       <div class="form-actions" style="margin-top:14px">
         <button class="btn btn-sm" onclick="addHeaderRow()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加请求头</button>
         <button class="btn btn-sm btn-primary" onclick="saveHeaders()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>保存请求头</button>
+        <button class="btn btn-sm" onclick="bulkEditHeaders()">批量编辑</button>
       </div>
       <div id="headerSaveResult" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">opencode 请求头（模拟官方客户端）</div>
+    <div class="section-desc">附加到发往 opencode zen 的请求。特殊值：$session / $request / $project / $client 会注入每请求的动态身份；留空删除该头。</div>
+    <div class="section-body">
+      <div class="field">
+        <label>请求头（每行一个，格式 Key: Value）</label>
+        <textarea id="zenHeadersBulk" rows="6" style="width:100%;font-family:ui-monospace,monospace;font-size:12px;border:1px solid var(--border2);border-radius:8px;padding:8px;background:var(--surface);color:var(--text)" placeholder="User-Agent: opencode/1.18.31&#10;x-opencode-project: global&#10;x-custom-header: my-value"></textarea>
+      </div>
+      <div class="form-actions" style="margin-top:10px">
+        <button class="btn btn-sm btn-primary" onclick="saveZenHeaders()">保存 opencode 请求头</button>
+      </div>
+      <div id="zenHeaderSaveResult" style="margin-top:8px"></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">自定义 Provider（OpenAI 兼容）</div>
+    <div class="section-desc">接入任意 OpenAI 兼容上游（OpenRouter / Groq / Cerebras / Gemini / Mistral / Together / 自建 vLLM 等）。模型命中自定义 Provider 时优先走该上游，失败自动按回退链降级，最终兜底 Cline 池。</div>
+    <div class="section-body">
+      <div id="providersList"></div>
+      <div class="form-actions" style="margin-top:10px">
+        <button class="btn btn-sm btn-primary" onclick="showProviderEditor()">＋ 添加 Provider</button>
+        <button class="btn btn-sm" onclick="loadProviderPresets()">从预设添加（免费源）</button>
+      </div>
+      <div id="providerEditor" style="display:none;margin-top:14px;border:1px solid var(--border2);border-radius:10px;padding:14px">
+        <div class="form-row">
+          <div class="field"><label>名称 *</label><input type="text" id="provName" placeholder="OpenRouter"></div>
+          <div class="field" style="flex:1.6"><label>Base URL *</label><input type="text" id="provBaseURL" placeholder="https://openrouter.ai/api/v1" style="font-family:ui-monospace,monospace"></div>
+        </div>
+        <div class="form-row">
+          <div class="field" style="flex:1.4"><label>API Key</label><input type="password" id="provKey" placeholder="sk-...（本地服务器可留空）"></div>
+          <div class="field"><label>优先级（小=优先）</label><input type="number" id="provPriority" value="10" min="0" max="1000"></div>
+          <div class="field"><label>超时(秒)</label><input type="number" id="provTimeout" value="300" min="5" max="600"></div>
+        </div>
+        <div class="form-row">
+          <div class="field" style="flex:1"><label>模型 ID（逗号分隔，如 z-ai/glm-5.3-flash, deepseek/deepseek-v4-flash）</label><input type="text" id="provModels" style="font-family:ui-monospace,monospace"></div>
+        </div>
+        <div class="form-row">
+          <div class="field" style="flex:1"><label>自定义请求头（每行 Key: Value，如 HTTP-Referer: https://mysite.com）</label><textarea id="provHeaders" rows="3" style="width:100%;font-family:ui-monospace,monospace;font-size:12px;border:1px solid var(--border2);border-radius:8px;padding:8px;background:var(--surface);color:var(--text)"></textarea></div>
+        </div>
+        <div class="form-row">
+          <div class="field">
+            <label>启用</label>
+            <select id="provEnabled"><option value="true">启用</option><option value="false">停用</option></select>
+          </div>
+          <div class="field">
+            <label>免费来源（供统计）</label>
+            <select id="provFree"><option value="true">免费</option><option value="false">付费</option></select>
+          </div>
+        </div>
+        <div class="form-actions" style="margin-top:10px">
+          <button class="btn btn-sm btn-primary" onclick="saveProvider()">保存 Provider</button>
+          <button class="btn btn-sm" onclick="hideProviderEditor()">取消</button>
+          <button class="btn btn-sm" onclick="testProvider()">测试连通性</button>
+          <span id="provTestResult" style="font-size:12px;margin-left:8px"></span>
+        </div>
+      </div>
+      <div id="providerPresets" style="display:none;margin-top:14px;border:1px solid var(--border2);border-radius:10px;padding:14px"></div>
     </div>
   </div>
 
@@ -1121,6 +1183,10 @@ const I18N = {
   'opencode 出口代理': 'OpenCode Egress Proxies',
   '发往 opencode 的请求可经代理池轮询出口；命中限流时冷却当前出口并自动跳过。支持 http / https / socks5 / socks5h，每行一个，如 ': 'Requests to opencode can egress through a rotating proxy pool; the current proxy is cooled down and skipped on rate limits. Supports http / https / socks5 / socks5h, one per line, e.g. ',
   '代理策略': 'Proxy strategy',
+  '自定义 Provider（OpenAI 兼容）': 'Custom Providers (OpenAI-compatible)',
+  '从预设添加（免费源）': 'Add from presets (free tiers)',
+  '测试连通性': 'Test connection',
+  '暂无自定义 Provider': 'No custom providers yet',
   '出口冷却状态': 'Egress cooldowns',
   '代理列表': 'Proxy list',
   '无冷却': 'None cooling',
@@ -1233,7 +1299,7 @@ document.querySelectorAll('.nav-item').forEach(el => {
 loadStats(); loadAccounts(); }
     if (el.dataset.tab === 'accounts') loadAccounts();
     if (el.dataset.tab === 'logs') loadRequestLogs(true);
-    if (el.dataset.tab === 'settings') { loadKeys(); loadModels(); loadConfig(); loadOcConfig(); }
+    if (el.dataset.tab === 'settings') { loadKeys(); loadModels(); loadConfig(); loadOcConfig(); loadZenHeaders(); loadProviders(); }
   });
 });
 
@@ -1246,7 +1312,7 @@ function switchTab(name) {
   if (name === 'dashboard') { loadStats(); loadAccounts(); }
   if (name === 'accounts') loadAccounts();
   if (name === 'logs') loadRequestLogs(true);
-  if (name === 'settings') { loadKeys(); loadModels(); loadOcConfig(); }
+  if (name === 'settings') { loadKeys(); loadModels(); loadOcConfig(); loadZenHeaders(); loadProviders(); }
 }
 
 // 导入子标签
@@ -1774,6 +1840,204 @@ function addHeaderRow() {
     '<td><input type="text" class="header-val" placeholder="value" style="font-size:12px;font-family:ui-monospace,monospace"></td>' +
     '<td><button class="btn btn-sm btn-danger" onclick="this.closest(\'tr\').remove()">✕</button></td>';
   tbody.appendChild(tr);
+}
+
+// 批量编辑：把表格转成 textarea，一行一个 Key: Value
+async function bulkEditHeaders() {
+  const tbody = _('headersTableBody');
+  const rows = tbody.querySelectorAll('tr');
+  const lines = [];
+  rows.forEach(tr => {
+    const k = tr.querySelector('.header-key'), v = tr.querySelector('.header-val');
+    if (k && k.value.trim()) lines.push(k.value.trim() + ': ' + (v ? v.value.trim() : ''));
+  });
+  const box = document.createElement('div');
+  box.innerHTML =
+    '<div class="field" style="margin-top:10px"><label>批量编辑（每行 Key: Value）</label>' +
+    '<textarea id="headersBulk" rows="10" style="width:100%;font-family:ui-monospace,monospace;font-size:12px;border:1px solid var(--border2);border-radius:8px;padding:8px;background:var(--surface);color:var(--text)">' + esc(lines.join('\n')) + '</textarea></div>' +
+    '<div class="form-actions" style="margin-top:8px"><button class="btn btn-sm btn-primary" onclick="applyBulkHeaders()">应用并保存</button>' +
+    '<button class="btn btn-sm" onclick="loadConfig()">取消</button></div>';
+  tbody.parentElement.parentElement.querySelector('.form-actions').style.display = 'none';
+  tbody.parentElement.parentElement.appendChild(box);
+}
+
+async function applyBulkHeaders() {
+  const text = _('headersBulk').value;
+  const headers = {};
+  text.split('\n').forEach(line => {
+    const idx = line.indexOf(':');
+    if (idx <= 0) return;
+    const k = line.slice(0, idx).trim();
+    const v = line.slice(idx + 1).trim();
+    if (k) headers[k] = v;
+  });
+  try {
+    await api('POST', '/config/update', { headers });
+    toast(t('请求头已保存') + ' (' + Object.keys(headers).length + ')', 'success');
+    loadConfig();
+  } catch (e) { toast(t('保存失败: ') + e.message, 'error'); }
+}
+
+// ========== opencode 请求头 ==========
+function parseHeaderText(text) {
+  const out = {};
+  text.split('\n').forEach(line => {
+    const idx = line.indexOf(':');
+    if (idx <= 0) return;
+    const k = line.slice(0, idx).trim();
+    const v = line.slice(idx + 1).trim();
+    if (k) out[k] = v;
+  });
+  return out;
+}
+
+async function loadZenHeaders() {
+  try {
+    const d = await api('GET', '/opencode/config');
+    const c = d.data || {};
+    const hdrs = c.zenHeaders || {};
+    _('zenHeadersBulk').value = Object.entries(hdrs).map(([k, v]) => k + ': ' + v).join('\n');
+  } catch (e) { /* ignore */ }
+}
+
+async function saveZenHeaders() {
+  try {
+    await api('POST', '/opencode/config/update', { zenHeaders: parseHeaderText(_('zenHeadersBulk').value) });
+    toast(t('opencode 请求头已保存'), 'success');
+    _('zenHeaderSaveResult').innerHTML = '<div style="color:var(--green);font-size:13px">✓ ' + t('已保存') + '</div>';
+    setTimeout(() => _('zenHeaderSaveResult').innerHTML = '', 4000);
+  } catch (e) { toast(t('保存失败: ') + e.message, 'error'); }
+}
+
+// ========== 自定义 Provider ==========
+let _editingProviderId = '';
+
+async function loadProviders() {
+  try {
+    const d = await api('GET', '/providers');
+    const list = d.data.providers || [];
+    const box = _('providersList');
+    if (!list.length) { box.innerHTML = '<div class="empty" style="padding:10px;color:var(--text3)">' + t('暂无自定义 Provider') + '</div>'; return; }
+    box.innerHTML = '<table><thead><tr><th>名称</th><th>Base URL</th><th>模型</th><th>优先级</th><th>状态</th><th style="width:150px"></th></tr></thead><tbody>' +
+      list.map(p =>
+        '<tr>' +
+          '<td>' + esc(p.name) + (p.free ? ' <span style="color:var(--green);font-size:11px">free</span>' : '') + '</td>' +
+          '<td class="mono" style="font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis">' + esc(p.baseURL) + '</td>' +
+          '<td style="font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis">' + esc((p.modelIds || []).join(', ')) + '</td>' +
+          '<td>' + p.priority + '</td>' +
+          '<td>' + (p.enabled ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--text3)">停用</span>') + '</td>' +
+          '<td><button class="btn btn-sm" onclick="editProvider(\'' + p.id + '\')">编辑</button> ' +
+              '<button class="btn btn-sm" onclick=\'testProviderById("' + p.id + '")\'>测试</button> ' +
+              '<button class="btn btn-sm btn-danger" onclick=\'deleteProvider("' + p.id + '")\'>✕</button></td>' +
+        '</tr>'
+      ).join('') + '</tbody></table>';
+  } catch (e) { /* ignore */ }
+}
+
+function showProviderEditor(p) {
+  _editingProviderId = p ? p.id : '';
+  _('provName').value = p ? p.name : '';
+  _('provBaseURL').value = p ? p.baseURL : '';
+  _('provKey').value = p ? (p.apiKey || '') : '';
+  _('provPriority').value = p ? p.priority : 10;
+  _('provTimeout').value = p ? (p.timeoutSec || 300) : 300;
+  _('provModels').value = p ? (p.modelIds || []).join(', ') : '';
+  _('provHeaders').value = p ? Object.entries(p.headers || {}).map(([k, v]) => k + ': ' + v).join('\n') : '';
+  _('provEnabled').value = p ? String(p.enabled !== false) : 'true';
+  _('provFree').value = p ? String(!!p.free) : 'true';
+  _('providerEditor').style.display = '';
+}
+
+function hideProviderEditor() { _('providerEditor').style.display = 'none'; }
+
+async function saveProvider() {
+  const payload = {
+    id: _editingProviderId,
+    name: _('provName').value.trim(),
+    baseURL: _('provBaseURL').value.trim(),
+    apiKey: _('provKey').value.trim(),
+    priority: parseInt(_('provPriority').value, 10) || 10,
+    timeoutSec: parseInt(_('provTimeout').value, 10) || 300,
+    modelIds: _('provModels').value.split(',').map(s => s.trim()).filter(Boolean),
+    headers: parseHeaderText(_('provHeaders').value),
+    enabled: _('provEnabled').value === 'true',
+    free: _('provFree').value === 'true',
+  };
+  try {
+    await api('POST', '/providers/save', payload);
+    toast(t('Provider 已保存'), 'success');
+    hideProviderEditor();
+    loadProviders();
+  } catch (e) { toast(t('保存失败: ') + e.message, 'error'); }
+}
+
+function editProvider(id) {
+  api('GET', '/providers').then(d => {
+    const p = (d.data.providers || []).find(x => x.id === id);
+    if (p) showProviderEditor(p);
+  });
+}
+
+async function deleteProvider(id) {
+  if (!confirm(t('确定删除该 Provider？'))) return;
+  try {
+    await api('POST', '/providers/delete', { id });
+    toast(t('已删除'), 'success');
+    loadProviders();
+  } catch (e) { toast(t('删除失败: ') + e.message, 'error'); }
+}
+
+async function testProviderById(id) {
+  _('provTestResult').textContent = '...';
+  try {
+    const d = await api('POST', '/providers/test', { id });
+    const r = d.data;
+    _('provTestResult').innerHTML = r.ok
+      ? '<span style="color:var(--green)">✓ ' + r.durationMs + 'ms</span>'
+      : '<span style="color:var(--red)">✗ ' + esc(r.error || 'failed') + '</span>';
+  } catch (e) { _('provTestResult').innerHTML = '<span style="color:var(--red)">✗</span>'; }
+}
+
+async function testProvider() {
+  // 先保存再测试（测试走已保存配置）
+  await saveProvider();
+  setTimeout(async () => {
+    try {
+      const d = await api('GET', '/providers');
+      const list = d.data.providers || [];
+      const mine = list.filter(p => p.name === _('provName').value.trim());
+      if (mine.length) testProviderById(mine[0].id);
+    } catch (e) {}
+  }, 400);
+}
+
+async function loadProviderPresets() {
+  const box = _('providerPresets');
+  if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+  try {
+    const d = await api('GET', '/providers/presets');
+    const presets = d.data.presets || [];
+    box.innerHTML = '<div style="font-weight:600;margin-bottom:8px">' + t('点击预设快速填充') + ':</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px">' + presets.map(p =>
+        '<button class="btn btn-sm" title="' + esc(p.notes) + '" onclick=\'applyPreset("' + p.key + '")\'>' +
+        esc(p.name) + (p.freeTier ? ' 🆓' : '') + '</button>'
+      ).join('') + '</div>' +
+      '<div style="font-size:11px;color:var(--text3);margin-top:8px">🆓 = 提供免费额度（需自行注册 API Key）</div>';
+    box.style.display = '';
+    box.dataset.presets = JSON.stringify(presets);
+  } catch (e) {}
+}
+
+function applyPreset(key) {
+  const presets = JSON.parse(_('providerPresets').dataset.presets || '[]');
+  const p = presets.find(x => x.key === key);
+  if (!p) return;
+  showProviderEditor(null);
+  _('provName').value = p.name;
+  _('provBaseURL').value = p.baseURL;
+  _('provHeaders').value = Object.entries(p.headers || {}).map(([k, v]) => k + ': ' + v).join('\n');
+  _('providerPresets').style.display = 'none';
+  toast(t('已填充预设，请补 API Key 和模型 ID'), 'info');
 }
 
 async function saveHeaders() {

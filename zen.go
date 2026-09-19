@@ -217,7 +217,10 @@ type zenConfigData struct {
 	Failover        bool             `json:"failover"`
 	FailoverCount   int              `json:"failoverCount"`
 	FailoverMinutes int              `json:"failoverMinutes"`
-	Compaction      zenCompactConfig `json:"compaction"`
+	// ZenHeaders 管理员自定义请求头：覆盖内置指纹头（User-Agent / x-opencode-*）。
+	// 特殊值 "$session"/"$request"/"$project"/"$client" 注入每请求的动态身份。
+	ZenHeaders map[string]string `json:"zenHeaders,omitempty"`
+	Compaction zenCompactConfig  `json:"compaction"`
 }
 
 func defaultZenConfig() *zenConfigData {
@@ -565,6 +568,21 @@ func callZenAPI(params map[string]any, stream bool) (*http.Response, error) {
 		req.Header.Set("x-opencode-session", sess)
 		req.Header.Set("x-opencode-request", user)
 		req.Header.Set("x-opencode-client", "cli")
+		// 管理员自定义头：支持 $session/$request/$project/$client 动态占位符，其余原样覆盖
+		for k, v := range cfg.ZenHeaders {
+			switch v {
+			case "$session":
+				req.Header.Set(k, sess)
+			case "$request":
+				req.Header.Set(k, user)
+			case "$project":
+				req.Header.Set(k, "global")
+			case "$client":
+				req.Header.Set(k, "cli")
+			default:
+				req.Header.Set(k, v)
+			}
+		}
 		if model, _ := params["model"].(string); model != "" {
 			if m, ok := resolveZenInfo(model); ok {
 				req.Header.Set("x-opencode-model", m.ID)

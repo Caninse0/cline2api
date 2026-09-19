@@ -821,7 +821,7 @@ func TestCallClineAPIDirectModelsFallBackOnModelCooldown(t *testing.T) {
 	}
 }
 
-// 非冷却类上游错误（如 500）不触发模型降级，直接透传。
+// 非冷却类上游错误（如 500）会先试完整条回退链，全部失败后才报错。
 func TestCallClineAPIDirectModelsNoFallbackOnServerError(t *testing.T) {
 	oldPool := pool
 	oldConfig := getProxyConfig()
@@ -867,14 +867,13 @@ func TestCallClineAPIDirectModelsNoFallbackOnServerError(t *testing.T) {
 	params := map[string]any{"model": model}
 	_, _, err := callClineAPI(params, false)
 	if err == nil {
-		t.Fatal("server error should be returned as-is")
+		t.Fatal("expected error after exhausting the fallback chain")
 	}
-	if calls != 1 {
-		t.Fatalf("upstream calls = %d, want 1 (no model fallback on 500)", calls)
+	// 链上每个模型都被尝试过（glm → deepseek → longcat）
+	if calls != len(freeModelChain) {
+		t.Fatalf("upstream calls = %d, want %d (full fallback chain on 500)", calls, len(freeModelChain))
 	}
-	if upstreamModel != model {
-		t.Fatalf("upstream model = %q, want %q", upstreamModel, model)
-	}
+	_ = upstreamModel
 }
 
 func TestHandleResponsesFreeReturnsTooManyRequestsWhenBothPoolsUnavailable(t *testing.T) {

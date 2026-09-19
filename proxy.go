@@ -792,16 +792,29 @@ func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account,
 		return callFreeClineAPI(params, stream)
 	}
 
-	// 显式模型请求：优先用客户端点名的模型；该模型在所有账号上都处于冷却
-	// （或持续 429）时，自动沿 free 模型链降级到下一个可用模型，而不是报错。
+	// 显式模型请求降级序列：
+	//  1. 自定义 provider（若该模型接入了 provider）
+	//  2. 客户端点名模型走 Cline 池
+	//  3. modelChain（管理员配置或内置 free 链）逐个降级
+	//  4. 全部失败 → 明确报错
 	for _, m := range modelFallbackChain(model) {
-		params["model"] = m
+		// 先试自定义 provider
+		if pResp, pErr, attempted := callCustomProviderAPI(withModel(params, m), stream); attempted {
+			if pErr == nil {
+				if m != model {
+					log.Printf("  model fallback: %q unavailable, serving via provider %q", model, m)
+				}
+				return pResp, nil, nil
+			}
+			log.Printf("  provider attempt failed for %q: %v", m, pErr)
+		}
+
 		for {
 			acc := pickAccountForModelStrict(m)
 			if acc == nil {
 				break // 该模型所有账号均冷却/不可用 → 尝试链上下一个模型
 			}
-			resp, usedAcc, err := callClineAPIWithAccount(acc, params, stream)
+			resp, usedAcc, err := callClineAPIWithAccount(acc, withModel(params, m), stream)
 			if err == nil {
 				if m != model {
 					log.Printf("  model fallback: %q cooling on all accounts, serving via %q", model, m)
@@ -814,15 +827,60 @@ func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account,
 			}
 			apiErr, ok := err.(*clineAPIError)
 			if !ok || apiErr.statusCode != http.StatusTooManyRequests {
-				return nil, usedAcc, err
+				// 非 429 错误：若后面还有候选（provider / 链）则继续降级，否则透传
+				if !hasAnyFallbackLeft(model, m) {
+					return nil, usedAcc, err
+				}
+				break
 			}
 			// 429：模型冷却已记录，换下一个账号；全部冷却后降级到下一个模型
+		}
+	}
+	// 终极兜底：free 链（手动链全部失败时自动切换）
+	if model != "free" && !isFreeAliasModel(model) {
+		if resp, acc, err := callFreeClineAPI(withModel(params, "free"), stream); err == nil {
+			log.Printf("  auto fallback: all configured options failed for %q, served by free chain", model)
+			return resp, acc, nil
 		}
 	}
 	if hasActiveAccounts() {
 		return nil, nil, &freeModelUnavailableError{message: fmt.Sprintf("model %q is cooling on all accounts and no fallback model is available", model)}
 	}
 	return nil, nil, fmt.Errorf("no active accounts available. Use --login or admin API to add accounts")
+}
+
+// withModel 返回带指定模型名的参数副本（避免污染调用方 map）。
+func withModel(params map[string]any, model string) map[string]any {
+	cp := make(map[string]any, len(params)+1)
+	for k, v := range params {
+		cp[k] = v
+	}
+	cp["model"] = model
+	return cp
+}
+
+// isFreeAliasModel 判断是否为 "free" 别名或链内免费模型（避免重复兜底）。
+func isFreeAliasModel(model string) bool {
+	if model == "free" {
+		return true
+	}
+	for _, m := range freeModelChain {
+		if m == model {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAnyFallbackLeft 判断点名模型之后是否还有候选（决定 500 是否透传）。
+func hasAnyFallbackLeft(requested, current string) bool {
+	chain := modelFallbackChain(requested)
+	for i, m := range chain {
+		if m == current {
+			return i < len(chain)-1
+		}
+	}
+	return false
 }
 
 // modelFallbackChain 显式模型的降级序列：点名模型优先，其后是管理员配置的

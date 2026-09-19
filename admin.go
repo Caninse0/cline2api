@@ -90,6 +90,11 @@ func registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/models/delete", auth(handleAdminModelDelete))
 	mux.HandleFunc("/admin/api/config", auth(handleAdminConfig))
 	mux.HandleFunc("/admin/api/config/update", auth(handleAdminUpdateConfig))
+	mux.HandleFunc("/admin/api/providers", auth(handleProvidersList))
+	mux.HandleFunc("/admin/api/providers/save", auth(handleProviderSave))
+	mux.HandleFunc("/admin/api/providers/delete", auth(handleProviderDelete))
+	mux.HandleFunc("/admin/api/providers/test", auth(handleProviderTest))
+	mux.HandleFunc("/admin/api/providers/presets", auth(handleProviderPresets))
 	mux.HandleFunc("/admin/api/password", auth(handleAdminPassword))
 	mux.HandleFunc("/admin/api/request-logs", auth(handleAdminRequestLogs))
 	mux.HandleFunc("/admin/api/open-external", auth(handleOpenExternal))
@@ -952,6 +957,7 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		"strategy":     cfg.Strategy,
 		"modelChain":   cfg.ModelChain,
 		"version":      appVersion,
+		"zenHeaders":   getZenConfig().ZenHeaders,
 		"poolPath":     poolPath,
 		"defaultModel": getDefaultModel(),
 		"headers":      cfg.Headers,
@@ -1365,6 +1371,7 @@ func handleOpenCodeConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		Failover        *bool             `json:"failover"`
 		FailoverCount   *int              `json:"failoverCount"`
 		FailoverMinutes *int              `json:"failoverMinutes"`
+		ZenHeaders      *map[string]string `json:"zenHeaders"`
 		Compaction      *zenCompactConfig `json:"compaction"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -1439,6 +1446,17 @@ func handleOpenCodeConfigUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cfg.FailoverMinutes = *req.FailoverMinutes
+	}
+	if req.ZenHeaders != nil {
+		cleaned := map[string]string{}
+		for k, v := range *req.ZenHeaders {
+			k = strings.TrimSpace(k)
+			if k == "" || strings.TrimSpace(v) == "" {
+				continue
+			}
+			cleaned[k] = strings.TrimSpace(v)
+		}
+		cfg.ZenHeaders = cleaned
 	}
 	if req.Compaction != nil {
 		c := req.Compaction
