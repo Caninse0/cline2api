@@ -206,6 +206,10 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
 .model-group-count{font-size:11px;color:var(--text3);font-weight:400;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:0 7px;line-height:16px}
 .model-group-body{margin:2px 0 4px 18px}
 .warn-box{display:flex;align-items:flex-start;gap:8px;margin-top:10px;padding:10px 12px;border-radius:8px;background:var(--yellow-soft);color:var(--yellow);font-size:13px;line-height:1.5;border:1px solid var(--yellow)}
+.subtabs{display:flex;gap:2px;border:1px solid var(--border2);border-radius:10px;background:var(--surface2);padding:3px;margin-bottom:18px;width:max-content;max-width:100%;overflow-x:auto}
+.subtab{padding:7px 16px;border-radius:8px;cursor:pointer;color:var(--text2);font-size:13px;font-weight:500;white-space:nowrap}
+.subtab:hover{color:var(--text)}
+.subtab.active{background:var(--surface);color:var(--accent);box-shadow:var(--shadow-sm)}
 
 /* action row */
 .action-row{display:flex;gap:8px;flex-wrap:wrap}
@@ -285,11 +289,14 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
     </div>
   </div>
   <div class="nav-section">
-    <div class="nav-section-label">管理</div>
+    <div class="nav-section-label">概览</div>
     <div class="nav-item active" data-tab="dashboard">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       <span class="nav-label">仪表盘</span>
     </div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-section-label">账号</div>
     <div class="nav-item" data-tab="accounts">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
       <span class="nav-label">账号管理</span>
@@ -302,9 +309,23 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/></svg>
       <span class="nav-label">请求日志</span>
     </div>
-    <div class="nav-item" data-tab="settings">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      <span class="nav-label">设置</span>
+  </div>
+  <div class="nav-section">
+    <div class="nav-section-label">配置</div>
+    <div class="nav-item" data-tab="routing">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="M6 9v3a3 3 0 0 0 3 3h6"/></svg>
+      <span class="nav-label">路由与模型</span>
+    </div>
+    <div class="nav-item" data-tab="upstreams">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
+      <span class="nav-label">上游服务</span>
+    </div>
+  </div>
+  <div class="nav-section">
+    <div class="nav-section-label">系统</div>
+    <div class="nav-item" data-tab="security">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <span class="nav-label">密钥与安全</span>
     </div>
     <div class="nav-item" data-tab="about">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -317,7 +338,7 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
       <span id="footerVersion" style="font-size:11px;opacity:0.7">dev</span>
     </div>
     <div style="margin-bottom:4px">API: <span id="footerApiAddr">127.0.0.1:3457</span></div>
-    <div><a href="#" onclick="openExternal('https://github.com/luawei1/cline2api');return false">GitHub</a> · <a href="#" onclick="openExternal('https://github.com/luawei1/cline2api/issues');return false">反馈</a> · MIT</div>
+    <div><a href="#" onclick="openExternal('https://github.com/dhananjaym182/cline2api');return false">GitHub</a> · <a href="#" onclick="openExternal('https://github.com/dhananjaym182/cline2api/issues');return false">反馈</a> · MIT</div>
     <div class="lang-switch">
       <button type="button" id="langZh" onclick="setLang('zh')">中文</button>
       <button type="button" id="langEn" onclick="setLang('en')">English</button>
@@ -401,7 +422,7 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
       <button class="btn" onclick="refreshAllTokens()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>刷新全部 Token</button>
       <button class="btn" onclick="document.getElementById('fileInput').click()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>从文件导入</button>
       <input type="file" id="fileInput" accept=".json,.txt" style="display:none" onchange="handleFileImport(event)">
-      <button class="btn" onclick="switchTab('settings');generateKey()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>生成 API 密钥</button>
+      <button class="btn" onclick="switchTab('security');generateKey()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>生成 API 密钥</button>
     </div>
   </div>
 </div>
@@ -528,9 +549,13 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
   </div>
 </div>
 
-<div id="tab-settings" class="tab-panel" style="display:none">
-  <div class="large-title">设置</div>
-  <div class="large-subtitle">管理 API 密钥、模型、代理配置与请求头</div>
+<div id="tab-security" class="tab-panel" style="display:none">
+  <div class="page-header">
+    <div>
+      <div class="large-title">密钥与安全</div>
+      <div class="large-subtitle">API 密钥、访问控制与危险操作</div>
+    </div>
+  </div>
 
   <div class="section">
     <div class="section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>API 密钥管理</div>
@@ -541,33 +566,6 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
       </div>
       <div id="keysList"></div>
       <div id="keyGenResult" style="margin-top:8px"></div>
-    </div>
-  </div>
-
-  <div class="section">
-    <div class="section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="15" x2="15" y2="15"/></svg><span>可用模型</span>
-      <span style="margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;font-weight:400;color:var(--text3)">
-        <span><span>上次同步</span>: <span id="modelSyncTime">从未同步</span></span>
-        <button class="sync-btn" id="syncModelsBtn" onclick="syncModels()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>从 Cline 同步模型</span></button>
-        <button class="sync-btn" id="syncOcModelsBtn" onclick="syncOcModels()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>从 opencode 同步模型</span></button>
-      </span>
-    </div>
-    <div class="section-body">
-      <div id="modelsList" class="action-row">加载中...</div>
-      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-        <div class="field" style="flex:1;min-width:220px">
-          <label>添加模型</label>
-          <input type="text" id="newModelId" placeholder="如 deepseek/deepseek-v4-flash" style="font-family:ui-monospace,monospace">
-        </div>
-        <div class="field">
-          <label>计费</label>
-          <select id="newModelCost">
-            <option value="pass">付费 (pass)</option>
-            <option value="free">免费 (free)</option>
-          </select>
-        </div>
-        <button class="btn btn-success" onclick="addModel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加</button>
-      </div>
     </div>
   </div>
 
@@ -605,6 +603,25 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
   </div>
 
   <div class="section">
+    <div class="section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>危险操作</div>
+    <div class="section-body">
+      <div class="action-row">
+        <button class="btn btn-danger" onclick="deleteAllAccounts()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>删除全部账号</button>
+        <button class="btn btn-danger" onclick="deleteAllKeys()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>删除全部密钥</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="tab-routing" class="tab-panel" style="display:none">
+  <div class="page-header">
+    <div>
+      <div class="large-title">路由与模型</div>
+      <div class="large-subtitle">默认模型、轮询策略、回退链与可用模型</div>
+    </div>
+  </div>
+
+  <div class="section">
     <div class="section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>代理配置</div>
     <div class="section-body">
       <div class="form-row">
@@ -630,6 +647,48 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
     </div>
   </div>
 
+  <div class="section">
+    <div class="section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="9" x2="15" y2="9"/><line x1="9" y1="15" x2="15" y2="15"/></svg><span>可用模型</span>
+      <span style="margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;font-weight:400;color:var(--text3)">
+        <span><span>上次同步</span>: <span id="modelSyncTime">从未同步</span></span>
+        <button class="sync-btn" id="syncModelsBtn" onclick="syncModels()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>从 Cline 同步模型</span></button>
+        <button class="sync-btn" id="syncOcModelsBtn" onclick="syncOcModels()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg><span>从 opencode 同步模型</span></button>
+      </span>
+    </div>
+    <div class="section-body">
+      <div id="modelsList" class="action-row">加载中...</div>
+      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="field" style="flex:1;min-width:220px">
+          <label>添加模型</label>
+          <input type="text" id="newModelId" placeholder="如 deepseek/deepseek-v4-flash" style="font-family:ui-monospace,monospace">
+        </div>
+        <div class="field">
+          <label>计费</label>
+          <select id="newModelCost">
+            <option value="pass">付费 (pass)</option>
+            <option value="free">免费 (free)</option>
+          </select>
+        </div>
+        <button class="btn btn-success" onclick="addModel()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>添加</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="tab-upstreams" class="tab-panel" style="display:none">
+  <div class="page-header">
+    <div>
+      <div class="large-title">上游服务</div>
+      <div class="large-subtitle">opencode zen、请求头与自定义 Provider</div>
+    </div>
+  </div>
+  <div class="subtabs" id="upstreamSubTabs">
+    <div class="subtab active" data-sub="zen">opencode Zen</div>
+    <div class="subtab" data-sub="headers">请求头</div>
+    <div class="subtab" data-sub="providers">自定义 Provider</div>
+  </div>
+
+  <div class="upstream-group" data-group="zen">
   <div class="section">
     <div class="section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><span>opencode 免费模型</span>
       <span style="margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;font-weight:400;color:var(--text3)">
@@ -701,8 +760,11 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
     </div>
   </div>
 
+  </div>
+
+  <div class="upstream-group" data-group="headers" style="display:none">
   <div class="section">
-    <div class="section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>请求头配置（模拟 Cline CLI 发出）</div>
+    <div class="section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V4h16v3"/><path d="M9 20h6"/><path d="M12 4v16"/></svg>Cline 请求头</div>
     <div class="section-desc">这些请求头会附加到所有转发给 Cline API 的请求中，以模拟官方客户端行为。</div>
     <div class="section-body">
       <table>
@@ -721,7 +783,7 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
   </div>
 
   <div class="section">
-    <div class="section-title">opencode 请求头（模拟官方客户端）</div>
+    <div class="section-title">opencode 请求头</div>
     <div class="section-desc">附加到发往 opencode zen 的请求。特殊值：$session / $request / $project / $client 会注入每请求的动态身份；留空删除该头。</div>
     <div class="section-body">
       <div class="field">
@@ -735,6 +797,9 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
     </div>
   </div>
 
+  </div>
+
+  <div class="upstream-group" data-group="providers" style="display:none">
   <div class="section">
     <div class="section-title">自定义 Provider（OpenAI 兼容）</div>
     <div class="section-desc">接入任意 OpenAI 兼容上游（OpenRouter / Groq / Cerebras / Gemini / Mistral / Together / 自建 vLLM 等）。模型命中自定义 Provider 时优先走该上游，失败自动按回退链降级，最终兜底 Cline 池。</div>
@@ -780,18 +845,7 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
       <div id="providerPresets" style="display:none;margin-top:14px;border:1px solid var(--border2);border-radius:10px;padding:14px"></div>
     </div>
   </div>
-
-  <div class="section">
-    <div class="section-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>危险操作</div>
-    <div class="section-body">
-      <div class="action-row">
-        <button class="btn btn-danger" onclick="deleteAllAccounts()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>删除全部账号</button>
-        <button class="btn btn-danger" onclick="deleteAllKeys()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>删除全部密钥</button>
-      </div>
-    </div>
   </div>
-</div>
-
 </div>
 
 <div id="tab-about" class="tab-panel" style="display:none">
@@ -829,7 +883,7 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
           <div style="width:28px;height:28px;border-radius:50%;background:var(--accent-soft);color:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:14px;flex-shrink:0">2</div>
           <div>
             <div style="font-weight:600;color:var(--text)">生成 API Key</div>
-            <div style="font-size:13px;color:var(--text2);margin-top:2px">前往「设置」页面生成密钥。如不配置任何密钥，代理允许匿名访问。</div>
+            <div style="font-size:13px;color:var(--text2);margin-top:2px">前往「密钥与安全」页面生成密钥。如不配置任何密钥，代理允许匿名访问。</div>
           </div>
         </div>
         <div style="display:flex;gap:12px;align-items:flex-start">
@@ -868,10 +922,10 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
     <div class="section-title">项目链接</div>
     <div class="section-body">
       <div style="display:flex;flex-direction:column;gap:10px;font-size:14px">
-        <div><span style="color:var(--text3);display:inline-block;width:80px">仓库地址</span><a href="#" onclick="openExternal('https://github.com/luawei1/cline2api');return false" style="color:var(--accent);cursor:pointer">github.com/luawei1/cline2api</a></div>
-        <div><span style="color:var(--text3);display:inline-block;width:80px">问题反馈</span><a href="#" onclick="openExternal('https://github.com/luawei1/cline2api/issues');return false" style="color:var(--accent);cursor:pointer">github.com/luawei1/cline2api/issues</a></div>
-        <div><span style="color:var(--text3);display:inline-block;width:80px">下载更新</span><a href="#" onclick="openExternal('https://github.com/luawei1/cline2api/releases');return false" style="color:var(--accent);cursor:pointer">github.com/luawei1/cline2api/releases</a></div>
-        <div><span style="color:var(--text3);display:inline-block;width:80px">开源协议</span>MIT License © 2026 luawei1</div>
+        <div><span style="color:var(--text3);display:inline-block;width:80px">仓库地址</span><a href="#" onclick="openExternal('https://github.com/dhananjaym182/cline2api');return false" style="color:var(--accent);cursor:pointer">github.com/dhananjaym182/cline2api</a></div>
+        <div><span style="color:var(--text3);display:inline-block;width:80px">问题反馈</span><a href="#" onclick="openExternal('https://github.com/dhananjaym182/cline2api/issues');return false" style="color:var(--accent);cursor:pointer">github.com/dhananjaym182/cline2api/issues</a></div>
+        <div><span style="color:var(--text3);display:inline-block;width:80px">下载更新</span><a href="#" onclick="openExternal('https://github.com/dhananjaym182/cline2api/releases');return false" style="color:var(--accent);cursor:pointer">github.com/dhananjaym182/cline2api/releases</a></div>
+        <div><span style="color:var(--text3);display:inline-block;width:80px">开源协议</span>MIT License © 2026 dhananjaym182</div>
       </div>
     </div>
   </div>
@@ -1021,7 +1075,7 @@ const I18N = {
   '添加 Cline 账号': 'Add a Cline account',
   '前往「导入账号」页面，通过 OAuth 登录或手动输入 refreshToken 添加账号。支持批量导入。': 'Go to Import and add via OAuth or a pasted refreshToken. Batch import supported.',
   '生成 API Key': 'Generate an API Key',
-  '前往「设置」页面生成密钥。如不配置任何密钥，代理允许匿名访问。': 'Generate a key in Settings. With no keys, the proxy allows anonymous access.',
+  '前往「密钥与安全」页面生成密钥。如不配置任何密钥，代理允许匿名访问。': 'Generate a key in Keys & Security. With no keys, the proxy allows anonymous access.',
   '配置客户端': 'Configure your client',
   '在 Claude Code、Cline 等客户端中设置：': 'Configure in clients like Claude Code or Cline:',
   '功能特性': 'Features',
@@ -1184,6 +1238,20 @@ const I18N = {
   '发往 opencode 的请求可经代理池轮询出口；命中限流时冷却当前出口并自动跳过。支持 http / https / socks5 / socks5h，每行一个，如 ': 'Requests to opencode can egress through a rotating proxy pool; the current proxy is cooled down and skipped on rate limits. Supports http / https / socks5 / socks5h, one per line, e.g. ',
   '代理策略': 'Proxy strategy',
   '自定义 Provider（OpenAI 兼容）': 'Custom Providers (OpenAI-compatible)',
+  '概览': 'Overview',
+  '账号': 'Accounts',
+  '配置': 'Configuration',
+  '系统': 'System',
+  '路由与模型': 'Routing & Models',
+  '上游服务': 'Upstreams',
+  '密钥与安全': 'Keys & Security',
+  '默认模型、轮询策略、回退链与可用模型': 'Default model, rotation strategy, fallback chain & models',
+  'opencode zen、请求头与自定义 Provider': 'opencode zen, request headers & custom providers',
+  'Cline 请求头': 'Cline Request Headers',
+  'opencode 请求头': 'OpenCode Request Headers',
+  '请求头': 'Headers',
+  '自定义 Provider': 'Providers',
+  'API 密钥、访问控制与危险操作': 'API keys, access control & danger zone',
   '从预设添加（免费源）': 'Add from presets (free tiers)',
   '测试连通性': 'Test connection',
   '暂无自定义 Provider': 'No custom providers yet',
@@ -1299,7 +1367,9 @@ document.querySelectorAll('.nav-item').forEach(el => {
 loadStats(); loadAccounts(); }
     if (el.dataset.tab === 'accounts') loadAccounts();
     if (el.dataset.tab === 'logs') loadRequestLogs(true);
-    if (el.dataset.tab === 'settings') { loadKeys(); loadModels(); loadConfig(); loadOcConfig(); loadZenHeaders(); loadProviders(); }
+    if (el.dataset.tab === 'routing') { loadModels().then(() => loadConfig()); }
+    if (el.dataset.tab === 'upstreams') { loadOcConfig(); loadZenHeaders(); loadProviders(); }
+    if (el.dataset.tab === 'security') { loadKeys(); loadConfig(); }
   });
 });
 
@@ -1312,8 +1382,19 @@ function switchTab(name) {
   if (name === 'dashboard') { loadStats(); loadAccounts(); }
   if (name === 'accounts') loadAccounts();
   if (name === 'logs') loadRequestLogs(true);
-  if (name === 'settings') { loadKeys(); loadModels(); loadOcConfig(); loadZenHeaders(); loadProviders(); }
+  if (name === 'routing') { loadModels().then(() => loadConfig()); }
+  if (name === 'upstreams') { loadOcConfig(); loadZenHeaders(); loadProviders(); }
+  if (name === 'security') { loadKeys(); loadConfig(); }
 }
+
+// 上游服务子标签
+document.querySelectorAll('#upstreamSubTabs .subtab').forEach(el => {
+  el.addEventListener('click', () => {
+    document.querySelectorAll('#upstreamSubTabs .subtab').forEach(e => e.classList.remove('active'));
+    el.classList.add('active');
+    document.querySelectorAll('.upstream-group').forEach(g => g.style.display = (g.dataset.group === el.dataset.sub) ? '' : 'none');
+  });
+});
 
 // 导入子标签
 document.querySelectorAll('#importTabs .tab').forEach(el => {
