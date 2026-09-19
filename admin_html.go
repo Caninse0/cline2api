@@ -622,6 +622,9 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
         <div class="field"><label>引擎版本</label><input type="text" id="settingVersion" disabled></div>
       </div>
       <div class="form-row">
+        <div class="field"><label>回退模型链</label><input type="text" id="settingModelChain" placeholder="z-ai/glm-5.3-flash, deepseek/deepseek-v4-flash, cline-free/longcat-2.0" onchange="updateConfig()"></div>
+      </div>
+      <div class="form-row">
         <div class="field"><label>账号文件</label><input type="text" id="settingPoolPath" disabled></div>
       </div>
     </div>
@@ -1325,6 +1328,7 @@ async function loadStats() {
     _('statOcTotalTokens').textContent = formatTokenCount(oc.totalTokens || 0);
     if (s.version) _('settingVersion').value = s.version;
     if (s.strategy) _('settingStrategy').value = s.strategy;
+    _('settingModelChain').value = (s.modelChain || []).join(', ');
   } catch (e) { /* ignore */ }
 }
 
@@ -1721,8 +1725,9 @@ function copyText(t) {
 async function updateConfig() {
   const strategy = _('settingStrategy').value;
   const defaultModel = _('settingDefModel').value;
+  const modelChain = _('settingModelChain').value.split(',').map(s => s.trim()).filter(Boolean);
   try {
-    await api('POST', '/config/update', { strategy, defaultModel });
+    await api('POST', '/config/update', { strategy, defaultModel, modelChain });
     toast(t('配置已更新'), 'success');
   } catch (e) { toast(t('更新失败: ') + e.message, 'error'); }
 }
@@ -2023,6 +2028,7 @@ async function loadConfig() {
     const c = d.data;
     if (c.address) _('settingAddr').value = c.address;
     if (c.strategy) _('settingStrategy').value = c.strategy;
+    _('settingModelChain').value = (c.modelChain || []).join(', ');
     if (c.version) _('settingVersion').value = c.version;
     if (c.version) {
       if (_('footerVersion')) _('footerVersion').textContent = c.version;

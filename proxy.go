@@ -825,11 +825,16 @@ func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account,
 	return nil, nil, fmt.Errorf("no active accounts available. Use --login or admin API to add accounts")
 }
 
-// modelFallbackChain 显式模型的降级序列：点名模型优先，其后是内置 free 模型链（去重）。
+// modelFallbackChain 显式模型的降级序列：点名模型优先，其后是管理员配置的
+// 回退链（modelChain）；未配置时用内置 free 模型链。均去重。
 func modelFallbackChain(requested string) []string {
-	chain := make([]string, 0, 1+len(freeModelChain))
+	configured := getProxyConfig().ModelChain
+	if len(configured) == 0 {
+		configured = freeModelChain
+	}
+	chain := make([]string, 0, 1+len(configured))
 	chain = append(chain, requested)
-	for _, m := range freeModelChain {
+	for _, m := range configured {
 		if m != requested {
 			chain = append(chain, m)
 		}
@@ -851,7 +856,13 @@ func hasActiveAccounts() bool {
 }
 
 func callFreeClineAPI(params map[string]any, stream bool) (*http.Response, *Account, error) {
-	for _, model := range freeModelChain {
+	// "free" 别名的实际顺序：管理员配置的回退链优先，否则内置 free 链。
+	configured := getProxyConfig().ModelChain
+	chain := freeModelChain
+	if len(configured) > 0 {
+		chain = configured
+	}
+	for _, model := range chain {
 		params["model"] = model
 		for {
 			acc := pickAccountForModelStrict(model)

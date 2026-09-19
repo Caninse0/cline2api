@@ -825,6 +825,9 @@ var (
 type proxyConfigData struct {
 	Strategy string            `json:"strategy"`
 	Headers  map[string]string `json:"headers"`
+	// ModelChain 冷却/降级时的模型回退顺序（管理员可配）。
+	// 空 = 使用内置 free 链（glm-5.3-flash → deepseek-v4-flash → longcat-2.0）。
+	ModelChain []string `json:"modelChain,omitempty"`
 }
 
 func defaultProxyConfig() *proxyConfigData {
@@ -947,6 +950,7 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		"address":      fmt.Sprintf("%s:%d", effectiveAdminHost(listenHost), listenPort),
 		"host":         listenHost,
 		"strategy":     cfg.Strategy,
+		"modelChain":   cfg.ModelChain,
 		"version":      appVersion,
 		"poolPath":     poolPath,
 		"defaultModel": getDefaultModel(),
@@ -974,6 +978,7 @@ func handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		Headers      map[string]string `json:"headers"`
 		DefaultModel string            `json:"defaultModel"`
 		Host         string            `json:"host"`
+		ModelChain   *[]string         `json:"modelChain"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeAPI(w, http.StatusBadRequest, apiResponse{Error: tAPI(r, "invalid_json")})
@@ -999,6 +1004,30 @@ func handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		for k, v := range req.Headers {
 			cfg.Headers[k] = v
 		}
+		changed = true
+	}
+
+	if req.ModelChain != nil {
+		// 校验回退链：允许 "free" 别名或存在的模型 ID；去空去重
+		known := map[string]bool{"free": true}
+		for _, m := range getAllModels() {
+			known[m.ID] = true
+		}
+		var chain []string
+		seen := map[string]bool{}
+		for _, raw := range *req.ModelChain {
+			id := strings.TrimSpace(raw)
+			if id == "" || seen[id] {
+				continue
+			}
+			if !known[id] {
+				writeAPI(w, http.StatusBadRequest, apiResponse{Error: fmt.Sprintf("unknown model in modelChain: %s", id)})
+				return
+			}
+			seen[id] = true
+			chain = append(chain, id)
+		}
+		cfg.ModelChain = chain
 		changed = true
 	}
 
