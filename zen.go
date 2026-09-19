@@ -422,19 +422,39 @@ func validateProxyList(proxies []string) error {
 }
 
 // ============ 客户端身份轮换 ============
-// opencode 服务端可能按 session / UA 维度记账限流；每次请求生成全新身份，
-// 等价于每个请求都来自一台新装的客户端。
+// opencode 服务端按客户端指纹（UA 版本 / session / request / project 头）
+// 校验 free tier 是否"来自 OpenCode 内部"；每次请求生成全新且格式逼真的身份。
+// 格式对齐官方客户端（sst/opencode v1.18.x）request.ts：
+//   User-Agent:          opencode/<version>
+//   x-opencode-project:  "global"（官方无仓库场景的静态 project id）
+//   x-opencode-session:  "ses_" + 26 位标识（6 位时间 hex + 20 位 base62）
+//   x-opencode-request:  "msg" + 26 位标识（消息 id）
+//   x-opencode-client:   "cli"
 
-var zenUserAgents = []string{
-	"opencode/latest/1.18.14/cli",
-	"opencode/latest/1.18.13/cli",
-	"opencode/1.18.14/cli",
-	"opencode/1.18.13/cli",
-	"opencode/1.18.12/cli",
-	"opencode/1.18.11/cli",
-	"opencode/latest/1.18.14/desktop",
-	"opencode/latest/1.18.13/desktop",
+// zenClientVersion 跟随 opencode 最新发布版本（packages/opencode/package.json）。
+const zenClientVersion = "1.18.31"
+
+const zenBase62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+
+// zenIdentifier 生成官方 identifier 风格的 26 位串：前 12 位为时间排序 hex，
+// 后 14 位随机 base62。与官方 descending() 的可见格式一致。
+func zenIdentifier() string {
+	nano := uint64(time.Now().UnixNano())
+	prefix := make([]byte, 12)
+	for i := 0; i < 6; i++ {
+		b := byte(nano >> (40 - 8*i))
+		prefix[i*2] = hexDigits[b>>4]
+		prefix[i*2+1] = hexDigits[b&0x0f]
+	}
+	bytes := make([]byte, 14)
+	rand.Read(bytes)
+	for i, b := range bytes {
+		bytes[i] = zenBase62[int(b)%len(zenBase62)]
+	}
+	return string(prefix) + string(bytes)
 }
+
+const hexDigits = "0123456789abcdef"
 
 func randHex(n int) string {
 	b := make([]byte, n)
@@ -463,11 +483,11 @@ func withRetryJitter(delay time.Duration) time.Duration {
 	return delay + time.Duration(float64(delay)*float64(randIntn(26))/100)
 }
 
-// freshZenIdentity 生成一组全新客户端身份（session, request-id, user-agent）。
+// freshZenIdentity 生成一组全新客户端身份（session, request, user-agent）。
 func freshZenIdentity() (string, string, string) {
-	return "sess_" + randHex(16),
-		"user_" + randHex(8),
-		zenUserAgents[randIntn(len(zenUserAgents))]
+	return "ses_" + zenIdentifier(),
+		"msg" + zenIdentifier(),
+		"opencode/" + zenClientVersion
 }
 
 // ============ zen 上游调用 ============
@@ -541,6 +561,7 @@ func callZenAPI(params map[string]any, stream bool) (*http.Response, error) {
 		req.Header.Set("Authorization", "Bearer "+cfg.Key)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("User-Agent", ua)
+		req.Header.Set("x-opencode-project", "global")
 		req.Header.Set("x-opencode-session", sess)
 		req.Header.Set("x-opencode-request", user)
 		req.Header.Set("x-opencode-client", "cli")
@@ -550,7 +571,7 @@ func callZenAPI(params map[string]any, stream bool) (*http.Response, error) {
 			}
 		}
 		log.Printf("  zen upstream: model=%v stream=%v msgs=%d via=%s attempt=%d session=%s",
-			bodyParamsModel(params), stream, getMsgCount(params), describeZenProxy(), attempt+1, truncate(sess, 24))
+			bodyParamsModel(params), stream, getMsgCount(params), describeZenProxy(), attempt+1, truncate(sess, 30))
 
 		resp, err := getZenHTTPClient().Do(req)
 		if err != nil {
@@ -571,6 +592,18 @@ func callZenAPI(params map[string]any, stream bool) (*http.Response, error) {
 		bodyBytes := readAllLimited(resp.Body, 64<<10)
 		resp.Body.Close()
 		reason := fmt.Sprintf("zen API %d: %s", resp.StatusCode, truncate(string(bodyBytes), 500))
+
+		// 上游 500/502/504 多为瞬时故障，退避重试（503 走限流分支）
+		if resp.StatusCode == 500 || resp.StatusCode == 502 || resp.StatusCode == 504 {
+			if attempt < retries {
+				log.Printf("  zen server error (%d), retry %d/%d after %v", resp.StatusCode, attempt+1, retries, delay)
+				time.Sleep(withRetryJitter(delay))
+				delay *= 2
+				continue
+			}
+			markZenFail()
+			return nil, fmt.Errorf("%s", reason)
+		}
 
 		if isRateLimited(resp.StatusCode, string(bodyBytes)) {
 			// 冷却当前出口代理（Retry-After 优先，默认 10 分钟）
@@ -652,6 +685,10 @@ func syncZenModels() modelSyncResult {
 		return fail(err)
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.Key)
+	req.Header.Set("User-Agent", "opencode/"+zenClientVersion)
+	req.Header.Set("x-opencode-project", "global")
+	req.Header.Set("x-opencode-session", "ses_"+zenIdentifier())
+	req.Header.Set("x-opencode-client", "cli")
 	client := &http.Client{Timeout: 25 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {

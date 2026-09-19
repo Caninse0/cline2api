@@ -410,6 +410,24 @@ func startProxy(host string, port int) error {
 			}
 			resp, err := callZenAPI(params, isStream)
 			if err != nil {
+				if fbResp, fbAcc, fbErr, attempted := zenFailoverToCline(params, isStream); attempted {
+					if fbErr == nil {
+						log.Printf("  chat failover: serving %q via cline pool", model)
+						reqLog.Upstream = upstreamCline
+						if fbAcc != nil {
+							reqLog.AccountID = fbAcc.AccountID
+							reqLog.AccountEmail = fbAcc.Email
+						}
+						defer fbResp.Body.Close()
+						if isStream {
+							handleStreamResponse(w, fbResp, fbAcc, &reqLog)
+						} else {
+							handleNonStreamResponse(w, fbResp, fbAcc, &reqLog)
+						}
+						return
+					}
+					err = fbErr
+				}
 				log.Printf("  api error: %v", err)
 				finalizeRequestLog(&reqLog, tokenUsage{}, time.Time{}, reqLog.StartedAt, false, err.Error())
 				writeJSON(w, http.StatusBadGateway, map[string]any{
@@ -764,6 +782,13 @@ func clineErrorHTTPStatus(err error) int {
 func callClineAPI(params map[string]any, stream bool) (*http.Response, *Account, error) {
 	model, _ := params["model"].(string)
 	if model == "free" {
+		return callFreeClineAPI(params, stream)
+	}
+	// zen 免费模型进入 cline 池仅发生在 zen 故障转移期间：改写成 cline 侧可用的
+	// free 模型链，否则 Cline 上游会报 "invalid model format. Expected format:
+	// modelType/model"（zen 的裸模型 ID 不符合 Cline 的 provider/model 格式）。
+	if zm, ok := resolveZenInfo(model); ok && isZenFreeModel(zm) {
+		log.Printf("  zen failover: rewriting zen model %q to cline free chain", model)
 		return callFreeClineAPI(params, stream)
 	}
 
@@ -1666,6 +1691,21 @@ func openAIToAnthropic(openAI map[string]any) map[string]any {
 	return out
 }
 
+// zenFailoverToCline zen 调用失败后的透明降级：改走 cline 账号池 free 模型链。
+// attempted=false 表示未启用故障转移，调用方维持原错误路径。
+func zenFailoverToCline(params map[string]any, stream bool) (*http.Response, *Account, error, bool) {
+	cfg := getZenConfig()
+	if !cfg.Failover {
+		return nil, nil, nil, false
+	}
+	orig, _ := params["model"].(string)
+	markZenFail()
+	log.Printf("  zen failover: %q unavailable upstream, falling back to cline free pool", orig)
+	params["model"] = "free"
+	resp, acc, err := callFreeClineAPI(params, stream)
+	return resp, acc, err, true
+}
+
 func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -1718,6 +1758,40 @@ func handleAnthropicMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		resp, err := callZenAPI(openAIReq, req.Stream)
 		if err != nil {
+			if fbResp, fbAcc, fbErr, attempted := zenFailoverToCline(openAIReq, req.Stream); attempted {
+				if fbErr == nil {
+					log.Printf("  anthropic failover: serving %q via cline pool", req.Model)
+					reqLog.Upstream = upstreamCline
+					if fbAcc != nil {
+						reqLog.AccountID = fbAcc.AccountID
+						reqLog.AccountEmail = fbAcc.Email
+					}
+					defer fbResp.Body.Close()
+					if req.Stream {
+						handleAnthropicStream(w, fbResp, fbAcc, &reqLog)
+					} else {
+						var raw map[string]any
+						if err := json.NewDecoder(fbResp.Body).Decode(&raw); err != nil {
+							finalizeRequestLog(&reqLog, tokenUsage{}, time.Time{}, reqLog.StartedAt, false, "decode response: "+err.Error())
+							writeJSON(w, http.StatusInternalServerError, map[string]any{
+								"error": map[string]string{"message": err.Error(), "type": "parse_error"},
+							})
+							return
+						}
+						out2 := normalizeOpenAIResponse(unwrapDataEnvelope(raw))
+						usage := parseTokenUsage(out2["usage"])
+						recordTokenUsage(fbAcc, reqLog.Model, usage)
+						finalizeRequestLog(&reqLog, usage, time.Time{}, reqLog.StartedAt, true, "")
+						anthropicResp := openAIToAnthropic(out2)
+						if hasToolUseBlocks(anthropicResp["content"]) {
+							anthropicResp["stop_reason"] = "tool_use"
+						}
+						writeJSON(w, http.StatusOK, anthropicResp)
+					}
+					return
+				}
+				err = fbErr
+			}
 			log.Printf("  anthropic api error: %v", err)
 			finalizeRequestLog(&reqLog, tokenUsage{}, time.Time{}, reqLog.StartedAt, false, err.Error())
 			writeJSON(w, http.StatusBadGateway, map[string]any{
