@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -214,16 +215,16 @@ type zenCompactConfig struct {
 }
 
 type zenConfigData struct {
-	Enabled         bool             `json:"enabled"`
-	Key             string           `json:"key"`
-	BaseURL         string           `json:"baseURL"`
-	Proxies         []string         `json:"proxies"`
-	ProxyStrategy   string           `json:"proxyStrategy"` // round_robin / random / fill
-	MaxConcurrency  int              `json:"maxConcurrency"`
-	Retries         int              `json:"retries"`
-	Failover        bool             `json:"failover"`
-	FailoverCount   int              `json:"failoverCount"`
-	FailoverMinutes int              `json:"failoverMinutes"`
+	Enabled         bool     `json:"enabled"`
+	Key             string   `json:"key"`
+	BaseURL         string   `json:"baseURL"`
+	Proxies         []string `json:"proxies"`
+	ProxyStrategy   string   `json:"proxyStrategy"` // round_robin / random / fill
+	MaxConcurrency  int      `json:"maxConcurrency"`
+	Retries         int      `json:"retries"`
+	Failover        bool     `json:"failover"`
+	FailoverCount   int      `json:"failoverCount"`
+	FailoverMinutes int      `json:"failoverMinutes"`
 	// ZenHeaders 管理员自定义请求头：覆盖内置指纹头（User-Agent / x-opencode-*）。
 	// 特殊值 "$session"/"$request"/"$project"/"$client" 注入每请求的动态身份。
 	ZenHeaders map[string]string `json:"zenHeaders,omitempty"`
@@ -732,7 +733,12 @@ func callZenAPI(params map[string]any, stream bool) (*http.Response, error) {
 				delay *= 2
 				continue
 			}
-			return nil, fmt.Errorf("zen request: %w", err)
+			msg := fmt.Errorf("zen request: %w", err)
+			if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "handshake") ||
+				strings.Contains(err.Error(), "connection refused") || strings.Contains(err.Error(), "unreachable") {
+				return nil, fmt.Errorf("%w（opencode.ai 网络不可达，可在管理页「上游服务 → opencode 出口代理」配置代理）", msg)
+			}
+			return nil, msg
 		}
 		if resp.StatusCode == http.StatusOK {
 			markZenSuccess()
@@ -983,8 +989,15 @@ func describeZenProxy() string {
 func syncZenModels() modelSyncResult {
 	res := modelSyncResult{SyncedAt: time.Now().Format(time.RFC3339)}
 	fail := func(err error) modelSyncResult {
-		log.Printf("zen models sync failed: %v", err)
-		res.Error = err.Error()
+		msg := err.Error()
+		// 网络类错误给出代理配置提示（opencode.ai 被网络封锁时直连必然失败）
+		if strings.Contains(msg, "timeout") || strings.Contains(msg, "handshake") ||
+			strings.Contains(msg, "connection refused") || strings.Contains(msg, "unreachable") ||
+			strings.Contains(msg, "connectex") {
+			msg += "（opencode.ai 当前网络不可达，可在管理页「上游服务 → opencode 出口代理」配置代理后重试）"
+		}
+		log.Printf("zen models sync failed: %v", msg)
+		res.Error = msg
 		return res
 	}
 
@@ -999,8 +1012,11 @@ func syncZenModels() modelSyncResult {
 	req.Header.Set("x-opencode-project", "global")
 	req.Header.Set("x-opencode-session", "ses_"+zenIdentifier())
 	req.Header.Set("x-opencode-client", "cli")
-	client := &http.Client{Timeout: 25 * time.Second}
-	resp, err := client.Do(req)
+	// 与 chat 同路：zen 代理池 + uTLS 指纹传输层，25s 超时
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	req = req.WithContext(ctx)
+	resp, err := getZenHTTPClient().Do(req)
 	if err != nil {
 		return fail(err)
 	}

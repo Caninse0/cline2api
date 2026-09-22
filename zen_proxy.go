@@ -90,7 +90,11 @@ func zenHTTP2Transport() *http2.Transport {
 func zenDialContext(ctx context.Context, network, addr string) (net.Conn, error) {
 	p, _ := pickZenProxy()
 	if p == "" {
-		d := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+		// 未配置 zen 代理时回退系统代理（HTTPS_PROXY / HTTP_PROXY），再直连
+		if u, envErr := http.ProxyFromEnvironment(&http.Request{URL: &url.URL{Scheme: "https", Host: addr}}); envErr == nil && u != nil {
+			return dialViaProxy(ctx, u.String(), network, addr)
+		}
+		d := &net.Dialer{Timeout: 12 * time.Second, KeepAlive: 30 * time.Second}
 		return d.DialContext(ctx, network, addr)
 	}
 	return dialViaProxy(ctx, p, network, addr)
