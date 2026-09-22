@@ -977,6 +977,27 @@ func TestPickAccountForModelLeastUsedSpreadsUsage(t *testing.T) {
 	}
 }
 
+func TestIsFreeModelEntry(t *testing.T) {
+	cases := []struct {
+		m    Model
+		want bool
+	}{
+		{Model{ID: "z-ai/glm-5.3-flash", Cost: "free"}, true},
+		{Model{ID: "cline-pass/glm-5.2", Cost: "pass"}, false},
+		// zen 来源：Cost 漏标但命中种子白名单 → 免费
+		{Model{ID: "mimo-v2.6-flash-free", Cost: "pass", Source: "zen"}, true},
+		// zen 付费模型 → 拒绝
+		{Model{ID: "claude-opus-5", Cost: "pass", Source: "zen"}, false},
+		// 非 zen 来源的 pass 模型 → 不免费
+		{Model{ID: "some-model", Cost: "pass", Source: "remote"}, false},
+	}
+	for _, c := range cases {
+		if got := isFreeModelEntry(c.m); got != c.want {
+			t.Errorf("isFreeModelEntry(%+v) = %v, want %v", c.m, got, c.want)
+		}
+	}
+}
+
 func TestCallClineAPIFreePicksLeastUsedAccount(t *testing.T) {
 	oldPool := pool
 	oldConfig := getProxyConfig()
@@ -1055,5 +1076,23 @@ func TestSortModelsByAvailabilityPrefersAvailableThenLeastUsed(t *testing.T) {
 	}
 	if len(got) != 2 {
 		t.Fatalf("chain length = %d, want 2", len(got))
+	}
+}
+
+func TestOnlyFreeConfigRoundTrip(t *testing.T) {
+	oldConfig := getProxyConfig()
+	t.Cleanup(func() { setProxyConfig(oldConfig) })
+
+	setProxyConfig(defaultProxyConfig())
+	if getProxyConfig().OnlyFree {
+		t.Fatal("default OnlyFree = true, want false")
+	}
+
+	on := true
+	cfg := getProxyConfig()
+	cfg.OnlyFree = on
+	setProxyConfig(cfg)
+	if !getProxyConfig().OnlyFree {
+		t.Fatal("OnlyFree not persisted after setProxyConfig")
 	}
 }

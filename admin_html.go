@@ -651,6 +651,14 @@ textarea{resize:vertical;min-height:88px;font-family:ui-monospace,'SF Mono','Cas
         <div class="field"><label>引擎版本</label><input type="text" id="settingVersion" disabled></div>
       </div>
       <div class="form-row">
+        <div class="field">
+          <label>只显示免费模型</label>
+          <select id="settingOnlyFree" onchange="updateConfig()">
+            <option value="false">关闭（返回全部模型）</option>
+            <option value="true">开启（/models 仅返回免费模型）</option>
+          </select>
+          <div style="font-size:12px;color:var(--text3);margin-top:4px">影响 /models、/v1/models 对客户端返回的模型列表，不影响管理页模型管理</div>
+        </div>
         <div class="field"><label>回退模型链</label><input type="text" id="settingModelChain" placeholder="z-ai/glm-5.3-flash, deepseek/deepseek-v4-flash, cline-free/longcat-2.0" oninput="this.dataset.dirty='1'" onchange="updateConfig()"></div>
       </div>
       <div class="form-row">
@@ -1981,8 +1989,9 @@ async function updateConfig() {
   const defaultModel = _('settingDefModel').value;
   const chainField = _('settingModelChain');
   const modelChain = chainField.value.split(',').map(s => s.trim()).filter(Boolean);
+  const onlyFree = _('settingOnlyFree') ? _('settingOnlyFree').value === 'true' : undefined;
   try {
-    await api('POST', '/config/update', { strategy, defaultModel, modelChain });
+    await api('POST', '/config/update', { strategy, defaultModel, modelChain, onlyFree });
     delete chainField.dataset.dirty;
     toast(t('配置已更新'), 'success');
   } catch (e) { toast(t('更新失败: ') + e.message, 'error'); }
@@ -2483,8 +2492,9 @@ async function loadConfig() {
     if (c.address) _('settingAddr').value = c.address;
     if (c.strategy) _('settingStrategy').value = c.strategy;
     _('settingModelChain').value = (c.modelChain || []).join(', ');
-    if (c.version) _('settingVersion').value = c.version;
+    if (c.onlyFree !== undefined && _('settingOnlyFree')) _('settingOnlyFree').value = String(c.onlyFree);
     if (c.version) {
+      if (_('settingVersion')) _('settingVersion').value = c.version;
       if (_('footerVersion')) _('footerVersion').textContent = c.version;
       if (_('aboutVersion')) _('aboutVersion').textContent = t('版本 ') + c.version;
     }

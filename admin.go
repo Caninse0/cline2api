@@ -833,6 +833,7 @@ type proxyConfigData struct {
 	// ModelChain 冷却/降级时的模型回退顺序（管理员可配）。
 	// 空 = 使用内置 free 链（glm-5.3-flash → deepseek-v4-flash → longcat-2.0）。
 	ModelChain []string `json:"modelChain,omitempty"`
+	OnlyFree   bool     `json:"onlyFree"` // 只显示免费模型：开启后 /models、/v1/models 仅返回免费模型
 }
 
 func defaultProxyConfig() *proxyConfigData {
@@ -961,6 +962,7 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		"poolPath":     poolPath,
 		"defaultModel": getDefaultModel(),
 		"headers":      cfg.Headers,
+		"onlyFree":     cfg.OnlyFree,
 		"localIPs":     detectLocalIPs(),
 		"hasPassword":  loadPool().AdminPasswordHash != "",
 	}})
@@ -985,6 +987,7 @@ func handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		DefaultModel string            `json:"defaultModel"`
 		Host         string            `json:"host"`
 		ModelChain   *[]string         `json:"modelChain"`
+		OnlyFree     *bool             `json:"onlyFree"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeAPI(w, http.StatusBadRequest, apiResponse{Error: tAPI(r, "invalid_json")})
@@ -1034,6 +1037,11 @@ func handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
 			chain = append(chain, id)
 		}
 		cfg.ModelChain = chain
+		changed = true
+	}
+
+	if req.OnlyFree != nil {
+		cfg.OnlyFree = *req.OnlyFree
 		changed = true
 	}
 
@@ -1096,6 +1104,7 @@ func handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	writeAPI(w, http.StatusOK, apiResponse{Success: true, Data: map[string]any{
 		"strategy":      cfg.Strategy,
 		"headers":       cfg.Headers,
+		"onlyFree":      cfg.OnlyFree,
 		"defaultModel":  getDefaultModel(),
 		"host":          listenHost,
 		"address":       fmt.Sprintf("%s:%d", effectiveAdminHost(listenHost), listenPort),

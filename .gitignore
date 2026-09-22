@@ -35,3 +35,6 @@ build/bin/
 
 # wails frontend scaffolding leftovers
 frontend/wailsjs/
+
+# 本地参考缓存（opencode2api 参考，非本仓库代码）
+.cache/

@@ -223,6 +223,15 @@ type chatRequest struct {
 	Extra               map[string]any  `json:"-"`
 }
 
+// isFreeModelEntry 判断模型是否免费（/models 过滤用）：
+// Cost 直接标记 free，或 zen 来源且命中免费判定（种子白名单兜底）。
+func isFreeModelEntry(m Model) bool {
+	if m.Cost == "free" {
+		return true
+	}
+	return isZenSource(m) && isZenFreeModel(m)
+}
+
 func startProxy(host string, port int) error {
 	p := loadPool()
 	loadRequestLogs()
@@ -311,19 +320,23 @@ func startProxy(host string, port int) error {
 	}
 
 	modelsHandler := apiKeyHandler(func(w http.ResponseWriter, r *http.Request) {
+		onlyFree := getProxyConfig().OnlyFree
 		all := getAllModels()
-		list := make([]map[string]any, len(all))
-		for i, m := range all {
+		list := make([]map[string]any, 0, len(all))
+		for _, m := range all {
+			if onlyFree && !isFreeModelEntry(m) {
+				continue
+			}
 			ownedBy := "cline"
 			if m.Source == "zen" || m.Provider == "opencode" {
 				ownedBy = "opencode"
 			}
-			list[i] = map[string]any{
+			list = append(list, map[string]any{
 				"id":       m.ID,
 				"object":   "model",
 				"created":  time.Now().UnixMilli(),
 				"owned_by": ownedBy,
-			}
+			})
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": list})
 	})
@@ -333,15 +346,6 @@ func startProxy(host string, port int) error {
 	chatHandler := apiKeyHandler(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
-			return
-		}
-		if activeCount == 0 && len(loadPool().Accounts) == 0 {
-			writeJSON(w, http.StatusUnauthorized, map[string]any{
-				"error": map[string]string{
-					"message": "No accounts in pool. Run with --add-account or POST /admin/login to add accounts.",
-					"type":    "auth_error",
-				},
-			})
 			return
 		}
 
@@ -444,6 +448,7 @@ func startProxy(host string, port int) error {
 			return
 		}
 
+		// cline 池路径才要求账号；zen 免费模型不依赖本地账号池
 		if activeCount == 0 && len(loadPool().Accounts) == 0 {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{
 				"error": map[string]string{
@@ -718,6 +723,11 @@ func buildUpstreamBody(params map[string]any, stream bool) map[string]any {
 		body["reasoning_effort"] = re
 	} else if re, ok := params["reasoningEffort"].(string); ok && re != "" {
 		body["reasoning_effort"] = re
+	}
+
+	// Cline 上游不接受 "none" 枚举：客户端显式关闭推理时直接省略该字段
+	if re, _ := body["reasoning_effort"].(string); re == "none" {
+		delete(body, "reasoning_effort")
 	}
 
 	for _, key := range passThroughKeys {
@@ -1550,6 +1560,7 @@ type anthropicReq struct {
 	TopP        float64         `json:"top_p,omitempty"`
 	TopK        int             `json:"top_k,omitempty"`
 	Stop        json.RawMessage `json:"stop_sequences,omitempty"`
+	Thinking    json.RawMessage `json:"thinking,omitempty"`
 	Tools       json.RawMessage `json:"tools,omitempty"`
 	ToolChoice  json.RawMessage `json:"tool_choice,omitempty"`
 	Metadata    json.RawMessage `json:"metadata,omitempty"`
@@ -1632,6 +1643,22 @@ func anthropicToOpenAI(req anthropicReq) map[string]any {
 	}
 	if req.TopP != 0 {
 		openAI["top_p"] = req.TopP
+	}
+	// Anthropic thinking 参数映射为 OpenAI reasoning_effort：
+	// disabled → "none"（buildUpstreamBody 会删除，不下发给 Cline 上游），
+	// enabled/adaptive → 默认 "high"。
+	if req.Thinking != nil {
+		var thinking struct {
+			Type string `json:"type"`
+		}
+		if err := json.Unmarshal(req.Thinking, &thinking); err == nil {
+			switch thinking.Type {
+			case "enabled", "adaptive":
+				openAI["reasoning_effort"] = defaultReasoningEffort
+			case "disabled":
+				openAI["reasoning_effort"] = "none"
+			}
+		}
 	}
 	// Convert Anthropic tools to OpenAI format
 	if req.Tools != nil {
@@ -1771,12 +1798,29 @@ func openAIToAnthropic(openAI map[string]any) map[string]any {
 		}
 	}
 
-	contentBlocks := []any{map[string]any{"type": "text", "text": text}}
+	// 上游 reasoning_content → Anthropic thinking 块（顺序：thinking 在 text 前）
+	var thinkingBlock map[string]any
+	if msg != nil {
+		if rc, ok := msg["reasoning_content"].(string); ok && rc != "" {
+			thinkingBlock = map[string]any{"type": "thinking", "thinking": rc, "signature": ""}
+		}
+	}
+
+	var contentBlocks []any
+	if thinkingBlock != nil {
+		contentBlocks = append(contentBlocks, thinkingBlock)
+	}
+	if text != "" || thinkingBlock == nil {
+		contentBlocks = append(contentBlocks, map[string]any{"type": "text", "text": text})
+	}
 
 	// Convert tool_calls to Anthropic tool_use blocks
 	if msg != nil {
 		if tc, ok := msg["tool_calls"].([]any); ok && len(tc) > 0 {
 			contentBlocks = []any{} // Clear text-only, proper response has both
+			if thinkingBlock != nil {
+				contentBlocks = append(contentBlocks, thinkingBlock)
+			}
 			if text != "" {
 				contentBlocks = append(contentBlocks, map[string]any{"type": "text", "text": text})
 			}
@@ -2076,6 +2120,8 @@ func handleAnthropicStream(w http.ResponseWriter, upstream *http.Response, acc *
 	*textIndex = -1
 	hasText := false
 	sawNamedTool := false
+	thinkingIdx := -1
+	thinkingOpen := false
 	pendingTools := map[int]*toolAccumulator{}
 
 	emitToolBlock := func(acc *toolAccumulator, index int) {
@@ -2164,10 +2210,44 @@ func handleAnthropicStream(w http.ResponseWriter, upstream *http.Response, acc *
 			delta = choice
 		}
 
+		// Reasoning content delta → Anthropic thinking block（thinking 在 text 前）
+		if rc, ok := delta["reasoning_content"].(string); ok && rc != "" {
+			if !thinkingOpen {
+				*textIndex++
+				thinkingIdx = *textIndex
+				thinkingOpen = true
+				emit("content_block_start", map[string]any{
+					"type":  "content_block_start",
+					"index": thinkingIdx,
+					"content_block": map[string]any{
+						"type":      "thinking",
+						"thinking":  "",
+						"signature": "",
+					},
+				})
+			}
+			emit("content_block_delta", map[string]any{
+				"type":  "content_block_delta",
+				"index": thinkingIdx,
+				"delta": map[string]any{
+					"type":     "thinking_delta",
+					"thinking": rc,
+				},
+			})
+		}
+
 		// Text content delta
 		if c, ok := delta["content"].(string); ok && c != "" {
 			if !hasText {
 				hasText = true
+				// thinking 块随 text 块开启而结束
+				if thinkingOpen {
+					emit("content_block_stop", map[string]any{
+						"type":  "content_block_stop",
+						"index": thinkingIdx,
+					})
+					thinkingOpen = false
+				}
 				*textIndex++
 				emit("content_block_start", map[string]any{
 					"type":  "content_block_start",
@@ -2230,6 +2310,15 @@ func handleAnthropicStream(w http.ResponseWriter, upstream *http.Response, acc *
 				}
 			}
 		}
+	}
+
+	// Stop thinking block if still open (上游没有 text 输出时)
+	if thinkingOpen {
+		emit("content_block_stop", map[string]any{
+			"type":  "content_block_stop",
+			"index": thinkingIdx,
+		})
+		thinkingOpen = false
 	}
 
 	// Stop text block if active
