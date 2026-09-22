@@ -3,7 +3,7 @@ name: Upstream CLI Release
 # 独立于 build.yml（桌面端）的流水线：只负责 CLI 产物。
 # 每 2 天检查一次上游是否发布新 tag：
 #   无新版本 → 直接结束；有新版本 → 拉取该 tag 的源码包，交叉编译 linux amd64/arm64，
-#   产物覆盖式上传到本仓库对应的 latest release。
+#   产物覆盖式上传到本仓库固定的 latest release（tag 恒为 latest，滚动更新）。
 on:
   schedule:
     # UTC 03:00，日期为奇数时触发（约每 2 天一次）
@@ -18,17 +18,19 @@ on:
 permissions:
   contents: write
 
-# 避免定时任务与手动触发同时构建，产生并发上传
+# latest release 是滚动覆盖的，必须避免并发构建互相覆盖
 concurrency:
   group: upstream-cli-release
   cancel-in-progress: false
 
 env:
   UPSTREAM_REPO: luawei1/cline2api
+  # 固定的发布目标 tag：所有版本的 CLI 产物都滚动覆盖到这里
+  RELEASE_TAG: latest
 
 jobs:
   # ---------------------------------------------------------------------------
-  # 1. 探测上游最新版本号，并与本仓库已有产物比对，决定是否需要构建
+  # 1. 探测上游最新版本号，并与 latest release 已发布的版本比对
   # ---------------------------------------------------------------------------
   check:
     name: Check upstream version
@@ -64,14 +66,21 @@ jobs:
             exit 0
           fi
 
-          # 已存在该版本的 release 且两个产物齐全 → 视为无新版本
-          ASSETS=$(gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" \
+          # latest release 的 notes 里带着当前已发布的版本号，用它判断是否已是最新
+          BODY=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json body --jq '.body' 2>/dev/null || true)
+          ASSETS=$(gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             --json assets --jq '.assets[].name' 2>/dev/null || true)
 
-          if echo "$ASSETS" | grep -qx 'cline-proxy-amd64' \
-            && echo "$ASSETS" | grep -qx 'cline-proxy-arm64'; then
-            echo "本仓库 ${VERSION} 的产物已存在（cline-proxy-amd64 / cline-proxy-arm64）"
-            echo "无新版本发布，流水线结束"
+          # sed 的 q 命令在首个匹配后立即退出，避免 head 提前关闭管道触发 SIGPIPE
+          PUBLISHED=$(printf '%s\n' "$BODY" | sed -n '/^版本：/{s/^版本：//;p;q;}')
+          echo "latest release 当前版本：${PUBLISHED:-（无）}"
+          echo "latest release 当前产物：$(printf '%s' "$ASSETS" | tr '\n' ' ')"
+
+          if [ -n "$PUBLISHED" ] && [ "$PUBLISHED" = "$VERSION" ] \
+            && printf '%s\n' "$ASSETS" | grep -qx 'cline-proxy-amd64' \
+            && printf '%s\n' "$ASSETS" | grep -qx 'cline-proxy-arm64'; then
+            echo "latest release 已是上游最新版本 ${VERSION}，无新版本发布，流水线结束"
             echo "needed=false" >> "$GITHUB_OUTPUT"
           else
             echo "发现上游新版本 ${VERSION}（或产物缺失），进入构建流程"
@@ -104,7 +113,8 @@ jobs:
           unzip -q -o source.zip
 
           # 解压后目录名由上游决定（tag v1.6.1 → cline2api-1.6.1），动态探测避免写死
-          SRC=$(find . -maxdepth 1 -mindepth 1 -type d | head -n1)
+          # -print -quit 直接取第一个结果，不用 head（避免 SIGPIPE）
+          SRC=$(find . -maxdepth 1 -mindepth 1 -type d -print -quit)
           SRC="${SRC#./}"
           echo "源码目录：$SRC"
           echo "src=$RUNNER_TEMP/upstream/$SRC" >> "$GITHUB_OUTPUT"
@@ -165,22 +175,23 @@ jobs:
           版本：${VERSION}
           EOF
 
+          # 所有版本都滚动发布到固定的 ${RELEASE_TAG} tag；首次运行创建，之后只更新
           # 用 GITHUB_TOKEN 创建 tag/release 不会触发其他 workflow，无需担心 build.yml 被连带唤醒
-          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "更新已有 release：${VERSION}"
-            gh release edit "$VERSION" --repo "$GITHUB_REPOSITORY" \
-              --title "$VERSION" --notes-file release-notes.md --latest
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "更新已有 release：${RELEASE_TAG}"
+            gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" --notes-file release-notes.md --latest
           else
-            echo "创建 release：${VERSION}"
-            gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" \
-              --title "$VERSION" --notes-file release-notes.md --latest
+            echo "创建 release：${RELEASE_TAG}"
+            gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "$RELEASE_TAG" --notes-file release-notes.md --latest
           fi
 
           # --clobber 实现覆盖式上传
-          gh release upload "$VERSION" \
+          gh release upload "$RELEASE_TAG" \
             dist/cline-proxy-amd64 dist/cline-proxy-arm64 \
             --repo "$GITHUB_REPOSITORY" --clobber
 
-          echo "发布完成：${VERSION}"
-          gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" --json assets \
+          echo "发布完成：${RELEASE_TAG} <- ${VERSION}"
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets \
             --jq '.assets[] | "  \(.name)  \(.size) bytes"'
