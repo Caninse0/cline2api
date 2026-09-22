@@ -4,7 +4,12 @@
 .cline-zen.json
 .cline-config.json
 cline-proxy
+cline-go-proxy
 cline-proxy.exe
+
+# local secrets & runtime logs
+credentials.txt
+proxy.log
 cline-proxy.exe~
 cline-go-proxy.exe
 .zcode/

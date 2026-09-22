@@ -90,6 +90,11 @@ func registerAdminRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/admin/api/models/delete", auth(handleAdminModelDelete))
 	mux.HandleFunc("/admin/api/config", auth(handleAdminConfig))
 	mux.HandleFunc("/admin/api/config/update", auth(handleAdminUpdateConfig))
+	mux.HandleFunc("/admin/api/providers", auth(handleProvidersList))
+	mux.HandleFunc("/admin/api/providers/save", auth(handleProviderSave))
+	mux.HandleFunc("/admin/api/providers/delete", auth(handleProviderDelete))
+	mux.HandleFunc("/admin/api/providers/test", auth(handleProviderTest))
+	mux.HandleFunc("/admin/api/providers/presets", auth(handleProviderPresets))
 	mux.HandleFunc("/admin/api/password", auth(handleAdminPassword))
 	mux.HandleFunc("/admin/api/request-logs", auth(handleAdminRequestLogs))
 	mux.HandleFunc("/admin/api/open-external", auth(handleOpenExternal))
@@ -825,6 +830,9 @@ var (
 type proxyConfigData struct {
 	Strategy string            `json:"strategy"`
 	Headers  map[string]string `json:"headers"`
+	// ModelChain 冷却/降级时的模型回退顺序（管理员可配）。
+	// 空 = 使用内置 free 链（glm-5.3-flash → deepseek-v4-flash → longcat-2.0）。
+	ModelChain []string `json:"modelChain,omitempty"`
 }
 
 func defaultProxyConfig() *proxyConfigData {
@@ -947,7 +955,9 @@ func handleAdminConfig(w http.ResponseWriter, r *http.Request) {
 		"address":      fmt.Sprintf("%s:%d", effectiveAdminHost(listenHost), listenPort),
 		"host":         listenHost,
 		"strategy":     cfg.Strategy,
+		"modelChain":   cfg.ModelChain,
 		"version":      appVersion,
+		"zenHeaders":   getZenConfig().ZenHeaders,
 		"poolPath":     poolPath,
 		"defaultModel": getDefaultModel(),
 		"headers":      cfg.Headers,
@@ -974,6 +984,7 @@ func handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		Headers      map[string]string `json:"headers"`
 		DefaultModel string            `json:"defaultModel"`
 		Host         string            `json:"host"`
+		ModelChain   *[]string         `json:"modelChain"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeAPI(w, http.StatusBadRequest, apiResponse{Error: tAPI(r, "invalid_json")})
@@ -999,6 +1010,30 @@ func handleAdminUpdateConfig(w http.ResponseWriter, r *http.Request) {
 		for k, v := range req.Headers {
 			cfg.Headers[k] = v
 		}
+		changed = true
+	}
+
+	if req.ModelChain != nil {
+		// 校验回退链：允许 "free" 别名或存在的模型 ID；去空去重
+		known := map[string]bool{"free": true}
+		for _, m := range getAllModels() {
+			known[m.ID] = true
+		}
+		var chain []string
+		seen := map[string]bool{}
+		for _, raw := range *req.ModelChain {
+			id := strings.TrimSpace(raw)
+			if id == "" || seen[id] {
+				continue
+			}
+			if !known[id] {
+				writeAPI(w, http.StatusBadRequest, apiResponse{Error: fmt.Sprintf("unknown model in modelChain: %s", id)})
+				return
+			}
+			seen[id] = true
+			chain = append(chain, id)
+		}
+		cfg.ModelChain = chain
 		changed = true
 	}
 
@@ -1246,6 +1281,7 @@ func handleAdminStats(w http.ResponseWriter, r *http.Request) {
 			"totalTokens":      totalTokens,
 			"cachedTokens":     cachedTokens,
 			"strategy":         getProxyConfig().Strategy,
+			"modelChain":       getProxyConfig().ModelChain,
 			"version":          appVersion,
 			// opencode zen 免费模型今日用量（从请求日志聚合）
 			"opencodeToday": opencodeUsageToday(),
@@ -1335,6 +1371,7 @@ func handleOpenCodeConfigUpdate(w http.ResponseWriter, r *http.Request) {
 		Failover        *bool             `json:"failover"`
 		FailoverCount   *int              `json:"failoverCount"`
 		FailoverMinutes *int              `json:"failoverMinutes"`
+		ZenHeaders      *map[string]string `json:"zenHeaders"`
 		Compaction      *zenCompactConfig `json:"compaction"`
 	}
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -1409,6 +1446,17 @@ func handleOpenCodeConfigUpdate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		cfg.FailoverMinutes = *req.FailoverMinutes
+	}
+	if req.ZenHeaders != nil {
+		cleaned := map[string]string{}
+		for k, v := range *req.ZenHeaders {
+			k = strings.TrimSpace(k)
+			if k == "" || strings.TrimSpace(v) == "" {
+				continue
+			}
+			cleaned[k] = strings.TrimSpace(v)
+		}
+		cfg.ZenHeaders = cleaned
 	}
 	if req.Compaction != nil {
 		c := req.Compaction

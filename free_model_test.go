@@ -749,7 +749,8 @@ func TestPickAccountForModelStrictPreservesStrategy(t *testing.T) {
 	}
 }
 
-func TestCallClineAPIDirectModelsKeepExactIDWithoutFallback(t *testing.T) {
+// 显式模型请求在 429（模型冷却）时应沿 free 链自动降级到下一个可用模型。
+func TestCallClineAPIDirectModelsFallBackOnModelCooldown(t *testing.T) {
 	oldPool := pool
 	oldConfig := getProxyConfig()
 	oldTransport := httpClient.Transport
@@ -771,10 +772,8 @@ func TestCallClineAPIDirectModelsKeepExactIDWithoutFallback(t *testing.T) {
 			pool = &AccountPool{Accounts: []*Account{account}}
 			setProxyConfig(defaultProxyConfig())
 
-			calls := 0
-			var upstreamModel string
+			var attempted []string
 			httpClient.Transport = freeModelRoundTripper(func(req *http.Request) (*http.Response, error) {
-				calls++
 				body, err := io.ReadAll(req.Body)
 				if err != nil {
 					return nil, err
@@ -783,31 +782,103 @@ func TestCallClineAPIDirectModelsKeepExactIDWithoutFallback(t *testing.T) {
 				if err := json.Unmarshal(body, &params); err != nil {
 					return nil, err
 				}
-				upstreamModel, _ = params["model"].(string)
+				upstreamModel, _ := params["model"].(string)
+				attempted = append(attempted, upstreamModel)
+				if upstreamModel == model {
+					// 点名模型冷却
+					return &http.Response{
+						StatusCode: http.StatusTooManyRequests,
+						Body:       io.NopCloser(strings.NewReader(`{"error":"quota"}`)),
+						Header:     make(http.Header),
+						Request:    req,
+					}, nil
+				}
+				// 降级模型成功
 				return &http.Response{
-					StatusCode: http.StatusTooManyRequests,
-					Body:       io.NopCloser(strings.NewReader(`{"error":"quota"}`)),
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"id":"ok","choices":[{"message":{"role":"assistant","content":"hi"}}]}`)),
 					Header:     make(http.Header),
 					Request:    req,
 				}, nil
 			})
 
 			params := map[string]any{"model": model}
-			_, _, err := callClineAPI(params, false)
-			if err == nil {
-				t.Fatal("direct model request should return upstream quota error")
+			resp, _, err := callClineAPI(params, false)
+			if err != nil {
+				t.Fatalf("expected fallback success, got %v", err)
 			}
-			if calls != 1 {
-				t.Fatalf("upstream calls = %d, want 1", calls)
+			defer resp.Body.Close()
+			if len(attempted) < 2 {
+				t.Fatalf("expected fallback attempts after cooling model, got %v", attempted)
 			}
-			if upstreamModel != model {
-				t.Fatalf("upstream model = %q, want %q", upstreamModel, model)
+			if attempted[0] != model {
+				t.Fatalf("first attempt = %q, want requested %q", attempted[0], model)
 			}
-			if params["model"] != model {
-				t.Fatalf("request model changed to %v", params["model"])
+			if attempted[len(attempted)-1] == model {
+				t.Fatal("fallback should not retry the cooling model")
+			}
+			// 回写验证：params["model"] 必须反映实际服务模型（供日志归因）
+			servedModel, _ := params["model"].(string)
+			if servedModel != attempted[len(attempted)-1] {
+				t.Fatalf("params model after fallback = %q, want last attempted %q", servedModel, attempted[len(attempted)-1])
 			}
 		})
 	}
+}
+
+// 非冷却类上游错误（如 500）会先试完整条回退链，全部失败后才报错。
+func TestCallClineAPIDirectModelsNoFallbackOnServerError(t *testing.T) {
+	oldPool := pool
+	oldConfig := getProxyConfig()
+	oldTransport := httpClient.Transport
+	t.Cleanup(func() {
+		pool = oldPool
+		setProxyConfig(oldConfig)
+		httpClient.Transport = oldTransport
+	})
+
+	model := "z-ai/glm-5.3-flash"
+	account := &Account{
+		AccountID:   "direct-account",
+		Email:       "direct@example.com",
+		AccessToken: "direct-token",
+		ExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		Status:      "active",
+	}
+	pool = &AccountPool{Accounts: []*Account{account}}
+	setProxyConfig(defaultProxyConfig())
+
+	calls := 0
+	var upstreamModel string
+	httpClient.Transport = freeModelRoundTripper(func(req *http.Request) (*http.Response, error) {
+		calls++
+		body, err := io.ReadAll(req.Body)
+		if err != nil {
+			return nil, err
+		}
+		var params map[string]any
+		if err := json.Unmarshal(body, &params); err != nil {
+			return nil, err
+		}
+		upstreamModel, _ = params["model"].(string)
+		return &http.Response{
+			StatusCode: http.StatusInternalServerError,
+			Body:       io.NopCloser(strings.NewReader(`{"error":"boom"}`)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+
+	params := map[string]any{"model": model}
+	_, _, err := callClineAPI(params, false)
+	if err == nil {
+		t.Fatal("expected error after exhausting the fallback chain")
+	}
+	// 链上每个模型都被尝试过（glm → deepseek → longcat）
+	if calls != len(freeModelChain) {
+		t.Fatalf("upstream calls = %d, want %d (full fallback chain on 500)", calls, len(freeModelChain))
+	}
+	_ = upstreamModel
 }
 
 func TestHandleResponsesFreeReturnsTooManyRequestsWhenBothPoolsUnavailable(t *testing.T) {
@@ -866,5 +937,123 @@ func TestHandleResponsesFreeReturnsTooManyRequestsWhenBothPoolsUnavailable(t *te
 	lastModel := freeModelChain[len(freeModelChain)-1]
 	if requestLogs[0].Model != lastModel {
 		t.Fatalf("request log model = %q, want %q", requestLogs[0].Model, lastModel)
+	}
+}
+
+func TestPickAccountForModelLeastUsedSpreadsUsage(t *testing.T) {
+	oldPool := pool
+	t.Cleanup(func() { pool = oldPool })
+
+	heavy := &Account{
+		AccountID:   "heavy",
+		Email:       "heavy@example.com",
+		AccessToken: "token-heavy",
+		ExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		Status:      "active",
+		ModelStats: map[string]*ModelStat{
+			freeModelPrimary: {ModelID: freeModelPrimary, UsageCount: 100},
+		},
+	}
+	light := &Account{
+		AccountID:   "light",
+		Email:       "light@example.com",
+		AccessToken: "token-light",
+		ExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		Status:      "active",
+		ModelStats: map[string]*ModelStat{
+			freeModelPrimary: {ModelID: freeModelPrimary, UsageCount: 2},
+		},
+	}
+	pool = &AccountPool{Accounts: []*Account{heavy, light}}
+
+	for i := 0; i < 5; i++ {
+		acc := pickAccountForModelLeastUsed(freeModelPrimary)
+		if acc == nil {
+			t.Fatal("pickAccountForModelLeastUsed returned nil with eligible accounts")
+		}
+		if acc.AccountID != "light" {
+			t.Fatalf("pick %d: got account %q, want the least-used account \"light\"", i+1, acc.AccountID)
+		}
+	}
+}
+
+func TestCallClineAPIFreePicksLeastUsedAccount(t *testing.T) {
+	oldPool := pool
+	oldConfig := getProxyConfig()
+	oldTransport := httpClient.Transport
+	t.Cleanup(func() {
+		pool = oldPool
+		setProxyConfig(oldConfig)
+		httpClient.Transport = oldTransport
+	})
+
+	first := &Account{
+		AccountID:   "acc-first",
+		Email:       "first@example.com",
+		AccessToken: "token-first",
+		ExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		Status:      "active",
+		ModelStats: map[string]*ModelStat{
+			freeModelPrimary: {ModelID: freeModelPrimary, UsageCount: 50},
+		},
+	}
+	second := &Account{
+		AccountID:   "acc-second",
+		Email:       "second@example.com",
+		AccessToken: "token-second",
+		ExpiresAt:   time.Now().Add(time.Hour).UnixMilli(),
+		Status:      "active",
+	}
+	pool = &AccountPool{Accounts: []*Account{first, second}}
+	setProxyConfig(defaultProxyConfig())
+
+	var chosen []string
+	httpClient.Transport = freeModelRoundTripper(func(req *http.Request) (*http.Response, error) {
+		token := strings.TrimPrefix(req.Header.Get("Authorization"), "Bearer ")
+		chosen = append(chosen, token)
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"id":"ok","choices":[]}`)),
+			Header:     make(http.Header),
+			Request:    req,
+		}, nil
+	})
+
+	for i := 0; i < 3; i++ {
+		resp, _, err := callClineAPI(map[string]any{"model": "free"}, false)
+		if err != nil || resp == nil {
+			t.Fatalf("call %d failed: %v", i+1, err)
+		}
+		resp.Body.Close()
+		if len(chosen) == 0 || chosen[len(chosen)-1] != "token-second" {
+			t.Fatalf("call %d served by %q, want the unused account \"token-second\"", i+1, chosen[len(chosen)-1])
+		}
+	}
+}
+
+func TestSortModelsByAvailabilityPrefersAvailableThenLeastUsed(t *testing.T) {
+	oldPool := pool
+	t.Cleanup(func() { pool = oldPool })
+
+	acc := &Account{
+		AccountID:      "acc-one",
+		Email:          "one@example.com",
+		AccessToken:    "token",
+		ExpiresAt:      time.Now().Add(time.Hour).UnixMilli(),
+		Status:         "active",
+		ModelCooldowns: map[string]time.Time{}, ModelStats: map[string]*ModelStat{
+			freeModelPrimary:  {ModelID: freeModelPrimary, UsageCount: 90},
+			freeModelFallback: {ModelID: freeModelFallback, UsageCount: 3},
+		},
+	}
+	pool = &AccountPool{Accounts: []*Account{acc}}
+
+	chain := []string{freeModelPrimary, freeModelFallback}
+	got := sortModelsByAvailability(chain)
+	if got[0] != freeModelFallback {
+		t.Fatalf("first model = %q, want the less-used %q", got[0], freeModelFallback)
+	}
+	if len(got) != 2 {
+		t.Fatalf("chain length = %d, want 2", len(got))
 	}
 }
